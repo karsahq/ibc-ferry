@@ -1,15 +1,17 @@
 # ibc-ferry
 
-A minimal, one-way **IBC v2** packet ferry for native Cosmos chains.
+A minimal **IBC v2** packet ferry for native Cosmos chains.
 
 This is the Go implementation. The validated Python prototype remains on the
 `prototype/python` branch as a reference.
 
-It is intentionally small: no database, no daemon, no retry loop, and no
-`MsgUpdateClient`. It creates the two clients needed for a single transfer,
-sends one ICS20 v2 packet, and relays `MsgRecvPacket`.
+The relayer builds IBC v2 messages as JSON and lets each chain's own binary sign
+and broadcast them. That keeps one tool working across chains with different
+ibc-go versions, such as Karsa (v11) and Gaia (v10).
 
 ## What it does
+
+The legacy one-shot mode:
 
 1. Creates a client on the source chain tracking the destination.
 2. Adds the counterparty client ID.
@@ -22,8 +24,10 @@ sends one ICS20 v2 packet, and relays `MsgRecvPacket`.
    proof height, and submits `MsgAcknowledgement`.
 
 Creating the destination client *after* the send, at the proof height, avoids
-an `MsgUpdateClient` transaction. That is the trick that keeps this tool
-minimal.
+an `MsgUpdateClient` transaction.
+
+The newer CLI also keeps a local inventory of links. An IBC v2 link is just a
+bidirectional pair of clients; v2 has no connections or channels.
 
 ## Requirements
 
@@ -32,18 +36,22 @@ minimal.
 - A funded relayer key on both chains, in a keyring the binary can read.
 - A JSON config file.
 
-## Build and run
+## Build
 
 ```bash
 go build -o ibc-ferry .
-./ibc-ferry --config config.json
 ```
 
-Copy `config.example.json` and fill in:
+## Config
+
+The legacy single-transfer config uses `src` and `dst`; see
+`config.example.json`. Multi-chain commands use a named `chains` map; see
+`config.chains.example.json`.
 
 | Field | Meaning |
 |---|---|
-| `src` / `dst` | Chain entries |
+| `chains` | Named chain entries for CLI commands |
+| `src` / `dst` | Legacy one-shot chain entries |
 | `binary` | Path to the chain CLI |
 | `home` | Chain home directory |
 | `node` | CometBFT RPC, e.g. `tcp://127.0.0.1:26657` |
@@ -53,9 +61,53 @@ Copy `config.example.json` and fill in:
 | `from` | Relayer key name |
 | `gas_prices` | Used by CLI transactions such as `add-counterparty` |
 | `fee` | Optional fixed fee for JSON transactions (some chains reject zero fee) |
-| `src_client` / `dst_client` | Client IDs. Use fresh IDs per run. |
-| `ack` | Optional; defaults to `true`. Set `false` for receive-only runs. |
-| `denom` / `amount` / `receiver` | ICS20 transfer fields |
+| `src_client` / `dst_client` | Legacy one-shot client IDs |
+| `ack` | Legacy one-shot; defaults to `true`. Set `false` for receive-only runs |
+| `denom` / `amount` / `receiver` | Legacy one-shot ICS20 transfer fields |
+
+## Commands
+
+Global flags go before the command:
+
+```bash
+ibc-ferry --config config.json chains
+ibc-ferry --config config.json links [--chain <name-or-chain-id>]
+ibc-ferry --config config.json link <link-id>
+```
+
+`--state <file>` overrides the local link state path. The default is
+`~/.ibc-ferry/links.json`, or `IBC_FERRY_STATE` when set.
+
+Running without a command keeps the legacy one-shot behavior:
+
+```bash
+ibc-ferry --config config.example.json
+```
+
+## Local state
+
+Links are stored as a versioned JSON document:
+
+```json
+{
+  "version": 1,
+  "links": [
+    {
+      "id": "gaia-test-1:07-tendermint-0<->karsa_262144-1:07-tendermint-0",
+      "chain_a": "gaia-test-1",
+      "client_a": "07-tendermint-0",
+      "chain_b": "karsa_262144-1",
+      "client_b": "07-tendermint-0",
+      "status": "active",
+      "created_at": "2026-10-31T15:00:00Z"
+    }
+  ]
+}
+```
+
+Writes are atomic: the state is written to a temporary file, synced, and
+renamed. The storage layer is deliberately separate from the model so a
+SQLite backend can replace it later without changing the CLI.
 
 ## How it works
 
@@ -75,10 +127,11 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 
 - **No timeout relay yet.** The v2 receipt query used by this CLI path does not
   return the non-membership proof required by `MsgTimeout`. Acks are supported.
+- **No connect/pair/doctor yet.** The link commands are read-only for now; the
+  link model and state store are in place for them.
 - **Client updates are only for acknowledgements.** A fresh destination client
-  is still created per run; use a new client ID for the next run.
-- **No retries or persistence.** If a step fails, rerun with fresh client IDs.
-- **No batching.** One packet per invocation.
+  is still created per one-shot run; use a new client ID for the next run.
+- **No retry loop or batching.** One packet per invocation.
 - **Experimental.** Not production relayer software.
 
 ## Tested

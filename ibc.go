@@ -455,6 +455,9 @@ func decodeAcknowledgement(encoded string) (map[string]any, error) {
 }
 
 func run(cfg Config) error {
+	if err := cfg.validateTransfer(); err != nil {
+		return err
+	}
 	log.Printf("creating %s on %s", cfg.SrcClient, cfg.Src.ChainID)
 	if _, err := createClient(cfg.Src, cfg.Dst, cfg.SrcClient, 0); err != nil {
 		return err
