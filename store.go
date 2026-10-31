@@ -533,7 +533,29 @@ func (s *LinkStore) Packets(linkID string) ([]PacketRecord, error) {
 }
 
 func (s *LinkStore) UpdatePacket(packet PacketRecord) error {
-	_, err := s.db.Exec(`UPDATE packets SET
+	return updatePacket(s.db, packet)
+}
+
+func (s *LinkStore) UpdatePackets(packets []PacketRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, packet := range packets {
+		if err := updatePacket(tx, packet); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func updatePacket(exec execer, packet PacketRecord) error {
+	_, err := exec.Exec(`UPDATE packets SET
 		status = ?, send_tx_hash = ?, recv_tx_hash = ?, ack_tx_hash = ?,
 		timeout_tx_hash = ?, acknowledgement = ?, proof_height = ?,
 		ack_proof_height = ?, attempts = ?, next_attempt_at = ?,

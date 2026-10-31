@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"syscall"
 	"time"
@@ -29,6 +30,7 @@ type relayOptions struct {
 	HTTPAddr      string
 	Retention     time.Duration
 	ClientRefresh time.Duration
+	BatchSize     int
 }
 
 type relayAction int
@@ -41,13 +43,24 @@ const (
 	relayDone
 )
 
-type relayResult struct {
+type preparedPacket struct {
+	Packet          PacketRecord
 	Action          relayAction
 	Status          string
-	TxHash          string
+	Message         map[string]any
+	BroadcastChain  namedChain
+	ClientID        string
+	Counterparty    namedChain
 	ProofHeight     int64
 	AckProofHeight  int64
 	Acknowledgement string
+}
+
+type batchKey struct {
+	ChainID     string
+	ClientID    string
+	Action      relayAction
+	ProofHeight int64
 }
 
 func cmdRelay(cfg Config, statePath string, args []string) error {
@@ -58,6 +71,7 @@ func cmdRelay(cfg Config, statePath string, args []string) error {
 	httpAddr := fs.String("http-addr", "", "optional status/metrics listen address")
 	retention := fs.Duration("retention", 0, "prune terminal packets older than this; 0 disables")
 	clientRefresh := fs.Duration("client-refresh", 0, "refresh idle clients at this interval; 0 disables")
+	batchSize := fs.Int("batch-size", 10, "maximum messages per relay transaction")
 	interval := fs.Duration("interval", 5*time.Second, "delay between cycles")
 	finality := fs.Int64("finality", 1, "blocks to wait before scanning")
 	lookback := fs.Int64("lookback", 1000, "blocks to scan on first run")
@@ -76,6 +90,7 @@ func cmdRelay(cfg Config, statePath string, args []string) error {
 		HTTPAddr:      *httpAddr,
 		Retention:     *retention,
 		ClientRefresh: *clientRefresh,
+		BatchSize:     *batchSize,
 	})
 }
 
@@ -88,6 +103,7 @@ func cmdStart(cfg Config, statePath string, args []string) error {
 	httpAddr := fs.String("http-addr", "127.0.0.1:8080", "status/metrics listen address")
 	retention := fs.Duration("retention", 7*24*time.Hour, "prune terminal packets older than this; 0 disables")
 	clientRefresh := fs.Duration("client-refresh", time.Hour, "refresh idle clients at this interval; 0 disables")
+	batchSize := fs.Int("batch-size", 10, "maximum messages per relay transaction")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -101,6 +117,7 @@ func cmdStart(cfg Config, statePath string, args []string) error {
 		HTTPAddr:      *httpAddr,
 		Retention:     *retention,
 		ClientRefresh: *clientRefresh,
+		BatchSize:     *batchSize,
 	})
 }
 
@@ -113,6 +130,9 @@ func runRelay(cfg Config, statePath string, opts relayOptions) error {
 	}
 	if opts.Lookback < 1 {
 		return fmt.Errorf("lookback must be at least 1")
+	}
+	if opts.BatchSize < 1 {
+		return fmt.Errorf("batch-size must be at least 1")
 	}
 
 	store, err := openLinkStore(statePath)
@@ -203,7 +223,7 @@ func processLink(store *LinkStore, cfg Config, link Link, opts relayOptions, sta
 	if err := scanLinkSide(store, link, chainB, chainA, link.ClientB, link.ClientA, directionBToA, opts); err != nil {
 		errs = append(errs, fmt.Errorf("scan %s: %w", chainB.Config.ChainID, err))
 	}
-	if err := processLinkPackets(store, cfg, link, stats); err != nil {
+	if err := processLinkPackets(store, cfg, link, stats, opts); err != nil {
 		errs = append(errs, err)
 	}
 	if err := refreshLinkClients(chainA, chainB, link, opts, stats, refreshed); err != nil {
@@ -363,12 +383,15 @@ func decodeAttributeText(value string) (string, bool) {
 	return string(decoded), true
 }
 
-func processLinkPackets(store *LinkStore, cfg Config, link Link, stats *relayStats) error {
+func processLinkPackets(store *LinkStore, cfg Config, link Link, stats *relayStats, opts relayOptions) error {
 	packets, err := store.Packets(link.ID)
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
+	var updated []PacketRecord
+	var actionable []preparedPacket
+
 	for _, packet := range packets {
 		if packet.Status == PacketAcked || packet.Status == PacketTimedOut {
 			continue
@@ -376,55 +399,24 @@ func processLinkPackets(store *LinkStore, cfg Config, link Link, stats *relaySta
 		if !packet.NextAttemptAt.IsZero() && packet.NextAttemptAt.After(now) {
 			continue
 		}
-		result, err := processPacket(cfg, link, packet)
+		prepared, err := preparePacket(cfg, link, packet)
 		if err != nil {
 			packet.Attempts++
 			packet.LastError = err.Error()
 			packet.NextAttemptAt = now.Add(relayBackoff(packet.Attempts))
-			if updateErr := store.UpdatePacket(packet); updateErr != nil {
-				return updateErr
-			}
+			updated = append(updated, packet)
 			log.Printf("relay: %s packet %s/%d: %v", link.ID, packet.Direction, packet.Sequence, err)
 			continue
 		}
-
-		switch result.Action {
-		case relayRecv:
-			packet.Status = PacketRecvSent
-			packet.RecvTxHash = result.TxHash
-			packet.Acknowledgement = result.Acknowledgement
-			packet.ProofHeight = result.ProofHeight
-			packet.Attempts = 0
-			packet.LastError = ""
-			packet.NextAttemptAt = time.Time{}
-			stats.addAction("recv")
-			log.Printf("relay: %s packet %s/%d: recv tx %s", link.ID, packet.Direction, packet.Sequence, result.TxHash)
-		case relayAck:
-			packet.Status = PacketAcked
-			packet.AckTxHash = result.TxHash
-			packet.Acknowledgement = result.Acknowledgement
-			packet.AckProofHeight = result.AckProofHeight
-			packet.Attempts = 0
-			packet.LastError = ""
-			packet.NextAttemptAt = time.Time{}
-			stats.addAction("ack")
-			log.Printf("relay: %s packet %s/%d: ack tx %s", link.ID, packet.Direction, packet.Sequence, result.TxHash)
-		case relayTimeout:
-			packet.Status = PacketTimedOut
-			packet.TimeoutTxHash = result.TxHash
-			packet.ProofHeight = result.ProofHeight
-			packet.Attempts = 0
-			packet.LastError = ""
-			packet.NextAttemptAt = time.Time{}
-			stats.addAction("timeout")
-			log.Printf("relay: %s packet %s/%d: timeout tx %s", link.ID, packet.Direction, packet.Sequence, result.TxHash)
+		switch prepared.Action {
 		case relayDone:
-			packet.Status = result.Status
+			packet.Status = prepared.Status
 			packet.Attempts = 0
 			packet.LastError = ""
 			packet.NextAttemptAt = time.Time{}
-			stats.addAction(result.Status)
-			log.Printf("relay: %s packet %s/%d: %s", link.ID, packet.Direction, packet.Sequence, result.Status)
+			stats.addAction(prepared.Status)
+			log.Printf("relay: %s packet %s/%d: %s", link.ID, packet.Direction, packet.Sequence, prepared.Status)
+			updated = append(updated, packet)
 		case relayWait:
 			if packet.Status == PacketPending {
 				packet.Status = PacketRecvSent
@@ -432,114 +424,284 @@ func processLinkPackets(store *LinkStore, cfg Config, link Link, stats *relaySta
 			packet.Attempts = 0
 			packet.LastError = ""
 			packet.NextAttemptAt = now.Add(5 * time.Second)
+			updated = append(updated, packet)
+		default:
+			actionable = append(actionable, prepared)
 		}
-		if err := store.UpdatePacket(packet); err != nil {
+	}
+	if len(updated) > 0 {
+		if err := store.UpdatePackets(updated); err != nil {
+			return err
+		}
+	}
+
+	for _, group := range groupPrepared(actionable, opts.BatchSize) {
+		if err := processPreparedGroup(store, group, stats); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func processPacket(cfg Config, link Link, packet PacketRecord) (relayResult, error) {
+func preparePacket(cfg Config, link Link, packet PacketRecord) (preparedPacket, error) {
 	src, dst, srcClient, dstClient, err := packetEndpoints(cfg, link, packet.Direction)
 	if err != nil {
-		return relayResult{}, err
+		return preparedPacket{}, err
 	}
 	if len(packet.Payloads) == 0 {
-		return relayResult{}, fmt.Errorf("packet has no payloads")
+		return preparedPacket{}, fmt.Errorf("packet has no payloads")
 	}
 	payloads := packetPayloadMessages(packet.Payloads)
 
 	commitment, err := packetCommitment(src.Config, srcClient, packet.Sequence)
 	if err != nil {
-		return relayResult{}, err
+		return preparedPacket{}, err
 	}
 	_, ackExists, err := packetAcknowledgement(dst.Config, dstClient, packet.Sequence)
 	if err != nil {
-		return relayResult{}, err
+		return preparedPacket{}, err
 	}
 
 	if commitment == "" {
 		if ackExists {
-			return relayResult{Action: relayDone, Status: PacketAcked}, nil
+			return preparedPacket{Action: relayDone, Status: PacketAcked}, nil
 		}
-		return relayResult{Action: relayDone, Status: PacketTimedOut}, nil
+		return preparedPacket{Action: relayDone, Status: PacketTimedOut}, nil
 	}
 
 	if ackExists {
 		ack := packet.Acknowledgement
 		if ack == "" && packet.RecvTxHash != "" {
-			ack, err = recvAcknowledgement(dst.Config, packet.RecvTxHash)
+			ack, err = recvAcknowledgementForSequence(dst.Config, packet.RecvTxHash, packet.Sequence)
 			if err != nil {
-				return relayResult{}, fmt.Errorf("read acknowledgement from recv tx: %w", err)
+				return preparedPacket{}, fmt.Errorf("read acknowledgement from recv tx: %w", err)
 			}
 		}
 		if ack == "" {
-			return relayResult{}, fmt.Errorf("acknowledgement bytes not captured yet")
+			return preparedPacket{}, fmt.Errorf("acknowledgement bytes not captured yet")
 		}
 		proof, proofHeight, height, err := getAckProof(dst.Config, dstClient, packet.Sequence)
 		if err != nil {
-			return relayResult{}, fmt.Errorf("ack proof: %w", err)
+			return preparedPacket{}, fmt.Errorf("ack proof: %w", err)
 		}
-		hash, err := ackPacketWithPayloads(
-			src.Config, dst.Config, srcClient, dstClient,
+		message, err := ackMessage(
+			src.Config, srcClient, dstClient,
 			packet.Sequence, packet.TimeoutTimestamp, payloads, ack, proof, proofHeight,
 		)
 		if err != nil {
-			return relayResult{}, err
+			return preparedPacket{}, err
 		}
-		return relayResult{
-			Action: relayAck, Status: PacketAcked, TxHash: hash,
-			AckProofHeight: height, Acknowledgement: ack,
+		return preparedPacket{
+			Packet: packet, Action: relayAck, Status: PacketAcked, Message: message,
+			BroadcastChain: src, ClientID: srcClient, Counterparty: dst,
+			ProofHeight: height, AckProofHeight: height, Acknowledgement: ack,
 		}, nil
 	}
 
 	received, err := packetReceipt(dst.Config, dstClient, packet.Sequence)
 	if err != nil {
-		return relayResult{}, err
+		return preparedPacket{}, err
 	}
 	if received {
-		return relayResult{Action: relayWait, Status: PacketRecvSent}, nil
+		return preparedPacket{Action: relayWait, Status: PacketRecvSent}, nil
+	}
+	// A successful recv tx writes the receipt and ack, but a query issued
+	// immediately afterwards can still see the previous height. Wait for the
+	// next cycle rather than sending a duplicate recv.
+	if packet.RecvTxHash != "" {
+		return preparedPacket{Action: relayWait, Status: PacketRecvSent}, nil
 	}
 
 	timeoutProof, timeoutProofHeight, timeoutHeight, err := getTimeoutProof(
 		dst.Config, dstClient, packet.Sequence, packet.TimeoutTimestamp,
 	)
 	if err == nil {
-		hash, err := timeoutPacketWithPayloads(
-			src.Config, dst.Config, srcClient, dstClient,
+		message, err := timeoutMessage(
+			src.Config, srcClient, dstClient,
 			packet.Sequence, packet.TimeoutTimestamp, payloads, timeoutProof, timeoutProofHeight,
 		)
 		if err != nil {
-			return relayResult{}, err
+			return preparedPacket{}, err
 		}
-		return relayResult{Action: relayTimeout, Status: PacketTimedOut, TxHash: hash, ProofHeight: timeoutHeight}, nil
+		return preparedPacket{
+			Packet: packet, Action: relayTimeout, Status: PacketTimedOut, Message: message,
+			BroadcastChain: src, ClientID: srcClient, Counterparty: dst,
+			ProofHeight: timeoutHeight,
+		}, nil
 	}
 	if errors.Is(err, errPacketReceived) {
-		return relayResult{Action: relayWait, Status: PacketRecvSent}, nil
+		return preparedPacket{Action: relayWait, Status: PacketRecvSent}, nil
 	}
 	if !errors.Is(err, errTimeoutNotReached) {
-		return relayResult{}, err
+		return preparedPacket{}, err
 	}
 
 	commitmentProof, err := getProof(src.Config, srcClient, packet.Sequence)
 	if err != nil {
-		return relayResult{}, err
+		return preparedPacket{}, err
 	}
-	if err := ensureClientAtHeight(dst.Config, src.Config, dstClient, commitmentProof.HeightNum); err != nil {
-		return relayResult{}, err
-	}
-	hash, recvAck, err := recvPacketWithPayloads(
+	message, err := recvMessage(
 		dst.Config, dstClient, srcClient,
-		packet.Sequence, packet.TimeoutTimestamp, payloads, commitmentProof.Height, commitmentProof.Commitment,
+		packet.Sequence, packet.TimeoutTimestamp, payloads,
+		commitmentProof.Height, commitmentProof.Commitment,
 	)
 	if err != nil {
-		return relayResult{}, err
+		return preparedPacket{}, err
 	}
-	return relayResult{
-		Action: relayRecv, Status: PacketRecvSent, TxHash: hash,
-		ProofHeight: commitmentProof.HeightNum, Acknowledgement: recvAck,
+	return preparedPacket{
+		Packet: packet, Action: relayRecv, Status: PacketRecvSent, Message: message,
+		BroadcastChain: dst, ClientID: dstClient, Counterparty: src,
+		ProofHeight: commitmentProof.HeightNum,
 	}, nil
+}
+
+func groupPrepared(prepared []preparedPacket, batchSize int) [][]preparedPacket {
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	groups := make(map[batchKey][]preparedPacket)
+	for _, packet := range prepared {
+		key := batchKey{
+			ChainID:     packet.BroadcastChain.Config.ChainID,
+			ClientID:    packet.ClientID,
+			Action:      packet.Action,
+			ProofHeight: packet.ProofHeight,
+		}
+		groups[key] = append(groups[key], packet)
+	}
+	keys := make([]batchKey, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].ChainID != keys[j].ChainID {
+			return keys[i].ChainID < keys[j].ChainID
+		}
+		if keys[i].ClientID != keys[j].ClientID {
+			return keys[i].ClientID < keys[j].ClientID
+		}
+		if keys[i].Action != keys[j].Action {
+			return keys[i].Action < keys[j].Action
+		}
+		return keys[i].ProofHeight < keys[j].ProofHeight
+	})
+
+	var chunks [][]preparedPacket
+	for _, key := range keys {
+		group := groups[key]
+		sort.Slice(group, func(i, j int) bool {
+			return group[i].Packet.Sequence < group[j].Packet.Sequence
+		})
+		for len(group) > 0 {
+			size := batchSize
+			if size > len(group) {
+				size = len(group)
+			}
+			chunks = append(chunks, group[:size])
+			group = group[size:]
+		}
+	}
+	return chunks
+}
+
+func processPreparedGroup(store *LinkStore, group []preparedPacket, stats *relayStats) error {
+	first := group[0]
+	if err := ensureClientAtHeight(
+		first.BroadcastChain.Config,
+		first.Counterparty.Config,
+		first.ClientID,
+		first.ProofHeight,
+	); err != nil {
+		return markPreparedFailure(store, group, err)
+	}
+
+	messages := make([]map[string]any, 0, len(group))
+	for _, packet := range group {
+		messages = append(messages, packet.Message)
+	}
+	hash, err := broadcastMessages(first.BroadcastChain.Config, messages)
+	if err != nil {
+		if len(group) > 1 {
+			log.Printf("relay: %s: %s batch failed, retrying individually: %v",
+				first.Packet.LinkID, relayActionName(first.Action), err)
+			for _, packet := range group {
+				if err := processPreparedGroup(store, []preparedPacket{packet}, stats); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		return markPreparedFailure(store, group, err)
+	}
+	if first.Action == relayRecv {
+		if acks, err := recvAcknowledgements(first.BroadcastChain.Config, hash); err == nil {
+			for i := range group {
+				group[i].Acknowledgement = acks[group[i].Packet.Sequence]
+			}
+		}
+	}
+	return markPreparedSuccess(store, group, hash, stats)
+}
+
+func markPreparedFailure(store *LinkStore, group []preparedPacket, relayErr error) error {
+	now := time.Now().UTC()
+	packets := make([]PacketRecord, 0, len(group))
+	for _, prepared := range group {
+		packet := prepared.Packet
+		packet.Attempts++
+		packet.LastError = relayErr.Error()
+		packet.NextAttemptAt = now.Add(relayBackoff(packet.Attempts))
+		packets = append(packets, packet)
+		log.Printf("relay: %s packet %s/%d: %v", packet.LinkID, packet.Direction, packet.Sequence, relayErr)
+	}
+	return store.UpdatePackets(packets)
+}
+
+func markPreparedSuccess(store *LinkStore, group []preparedPacket, hash string, stats *relayStats) error {
+	packets := make([]PacketRecord, 0, len(group))
+	for _, prepared := range group {
+		packet := prepared.Packet
+		switch prepared.Action {
+		case relayRecv:
+			packet.Status = PacketRecvSent
+			packet.RecvTxHash = hash
+			packet.ProofHeight = prepared.ProofHeight
+			packet.Acknowledgement = prepared.Acknowledgement
+		case relayAck:
+			packet.Status = PacketAcked
+			packet.AckTxHash = hash
+			packet.AckProofHeight = prepared.AckProofHeight
+			packet.Acknowledgement = prepared.Acknowledgement
+		case relayTimeout:
+			packet.Status = PacketTimedOut
+			packet.TimeoutTxHash = hash
+			packet.ProofHeight = prepared.ProofHeight
+		}
+		packet.Attempts = 0
+		packet.LastError = ""
+		packet.NextAttemptAt = time.Time{}
+		packets = append(packets, packet)
+		stats.addAction(relayActionName(prepared.Action))
+	}
+	if err := store.UpdatePackets(packets); err != nil {
+		return err
+	}
+	log.Printf("relay: %s: %s tx %s (%d packet(s))",
+		group[0].Packet.LinkID, relayActionName(group[0].Action), hash, len(group))
+	return nil
+}
+
+func relayActionName(action relayAction) string {
+	switch action {
+	case relayRecv:
+		return "recv"
+	case relayAck:
+		return "ack"
+	case relayTimeout:
+		return "timeout"
+	default:
+		return "relay"
+	}
 }
 
 func oppositeDirection(direction string) string {

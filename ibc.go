@@ -269,17 +269,9 @@ func recvPacket(dst ChainConfig, dstClient string, srcClient string, sequence, t
 }
 
 func recvPacketWithPayloads(dst ChainConfig, dstClient string, srcClient string, sequence, timeout int64, payloads []map[string]any, proofHeight map[string]any, commitment string) (string, string, error) {
-	signer, err := relayerAddress(dst)
+	msg, err := recvMessage(dst, dstClient, srcClient, sequence, timeout, payloads, proofHeight, commitment)
 	if err != nil {
 		return "", "", err
-	}
-	packet := packetMessageWithPayloads(sequence, timeout, srcClient, dstClient, payloads)
-	msg := map[string]any{
-		"@type":            "/ibc.core.channel.v2.MsgRecvPacket",
-		"packet":           packet,
-		"proof_commitment": commitment,
-		"proof_height":     proofHeight,
-		"signer":           signer,
 	}
 	hash, err := broadcast(dst, emptyTx(msg, "700000"))
 	if err != nil {
@@ -295,36 +287,81 @@ func recvPacketWithPayloads(dst ChainConfig, dstClient string, srcClient string,
 	return hash, ack, nil
 }
 
+func recvMessage(dst ChainConfig, dstClient string, srcClient string, sequence, timeout int64, payloads []map[string]any, proofHeight map[string]any, commitment string) (map[string]any, error) {
+	signer, err := relayerAddress(dst)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"@type":            "/ibc.core.channel.v2.MsgRecvPacket",
+		"packet":           packetMessageWithPayloads(sequence, timeout, srcClient, dstClient, payloads),
+		"proof_commitment": commitment,
+		"proof_height":     proofHeight,
+		"signer":           signer,
+	}, nil
+}
+
 func recvAcknowledgement(chain ChainConfig, hash string) (string, error) {
-	out, err := runCLI(chain, true, "q", "tx", hash, "--node", chain.Node, "-o", "json")
+	acks, err := recvAcknowledgements(chain, hash)
 	if err != nil {
 		return "", err
 	}
+	for _, ack := range acks {
+		return ack, nil
+	}
+	return "", fmt.Errorf("write_acknowledgement event not found in %s", hash)
+}
+
+func recvAcknowledgementForSequence(chain ChainConfig, hash string, sequence int64) (string, error) {
+	acks, err := recvAcknowledgements(chain, hash)
+	if err != nil {
+		return "", err
+	}
+	ack := acks[sequence]
+	if ack == "" {
+		return "", fmt.Errorf("acknowledgement for sequence %d not found in %s", sequence, hash)
+	}
+	return ack, nil
+}
+
+func recvAcknowledgements(chain ChainConfig, hash string) (map[int64]string, error) {
+	out, err := runCLI(chain, true, "q", "tx", hash, "--node", chain.Node, "-o", "json")
+	if err != nil {
+		return nil, err
+	}
 	var tx map[string]any
 	if err := json.Unmarshal([]byte(out), &tx); err != nil {
-		return "", fmt.Errorf("decode recv tx: %w", err)
+		return nil, fmt.Errorf("decode recv tx: %w", err)
 	}
+	acks := make(map[int64]string)
 	events, _ := tx["events"].([]any)
 	for _, rawEvent := range events {
 		event, _ := rawEvent.(map[string]any)
 		if event["type"] != "write_acknowledgement" {
 			continue
 		}
+		var sequence int64
+		var encoded string
 		attributes, _ := event["attributes"].([]any)
 		for _, rawAttr := range attributes {
 			attr, _ := rawAttr.(map[string]any)
-			if attr["key"] != "encoded_acknowledgement_hex" {
-				continue
+			switch attr["key"] {
+			case "packet_sequence":
+				sequence, _ = strconv.ParseInt(str(attr["value"]), 10, 64)
+			case "encoded_acknowledgement_hex":
+				encoded = str(attr["value"])
 			}
-			value, _ := attr["value"].(string)
-			ack, err := hex.DecodeString(value)
-			if err != nil {
-				return "", fmt.Errorf("decode ack event: %w", err)
-			}
-			return base64.StdEncoding.EncodeToString(ack), nil
 		}
+		if sequence == 0 || encoded == "" {
+			continue
+		}
+		ack, err := hex.DecodeString(encoded)
+		if err != nil {
+			return nil, fmt.Errorf("decode ack event for sequence %d: %w", sequence, err)
+		}
+		acks[sequence] = base64.StdEncoding.EncodeToString(ack)
 	}
-	return "", fmt.Errorf("write_acknowledgement event not found in %s", hash)
+	return acks, nil
 }
 
 func queryClientHeader(chain ChainConfig, height int64) (map[string]any, error) {
@@ -430,22 +467,9 @@ func ackPacketWithPayloads(src, dst ChainConfig, srcClient, dstClient string, se
 	if err := updateClient(src, dst, srcClient, height); err != nil {
 		return "", err
 	}
-	signer, err := relayerAddress(src)
+	msg, err := ackMessage(src, srcClient, dstClient, sequence, timeout, payloads, ack, proof, proofHeight)
 	if err != nil {
 		return "", err
-	}
-	packet := packetMessageWithPayloads(sequence, timeout, srcClient, dstClient, payloads)
-	ackMessage, err := decodeAcknowledgement(ack)
-	if err != nil {
-		return "", err
-	}
-	msg := map[string]any{
-		"@type":           "/ibc.core.channel.v2.MsgAcknowledgement",
-		"packet":          packet,
-		"acknowledgement": ackMessage,
-		"proof_acked":     proof,
-		"proof_height":    proofHeight,
-		"signer":          signer,
 	}
 	hash, err := broadcast(src, emptyTx(msg, "700000"))
 	if err != nil {
@@ -455,6 +479,25 @@ func ackPacketWithPayloads(src, dst ChainConfig, srcClient, dstClient string, se
 		return "", err
 	}
 	return hash, nil
+}
+
+func ackMessage(src ChainConfig, srcClient, dstClient string, sequence, timeout int64, payloads []map[string]any, ack, proof string, proofHeight map[string]any) (map[string]any, error) {
+	signer, err := relayerAddress(src)
+	if err != nil {
+		return nil, err
+	}
+	decodedAck, err := decodeAcknowledgement(ack)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"@type":           "/ibc.core.channel.v2.MsgAcknowledgement",
+		"packet":          packetMessageWithPayloads(sequence, timeout, srcClient, dstClient, payloads),
+		"acknowledgement": decodedAck,
+		"proof_acked":     proof,
+		"proof_height":    proofHeight,
+		"signer":          signer,
+	}, nil
 }
 
 func packetMessage(sequence, timeout int64, srcClient, dstClient string, payload map[string]any) map[string]any {
@@ -531,7 +574,11 @@ func ensureClientAtHeight(chain, counterparty ChainConfig, clientID string, heig
 	if height <= trustedHeight {
 		return nil
 	}
-	return updateClient(chain, counterparty, clientID, height)
+	if err := updateClient(chain, counterparty, clientID, height); err != nil {
+		return err
+	}
+	waitNextBlock(chain)
+	return nil
 }
 
 func timeoutPacket(src, dst ChainConfig, srcClient, dstClient string, sequence, timeout int64, payload map[string]any, proof string, proofHeight map[string]any) (string, error) {
@@ -546,16 +593,9 @@ func timeoutPacketWithPayloads(src, dst ChainConfig, srcClient, dstClient string
 	if err := ensureClientAtHeight(src, dst, srcClient, height); err != nil {
 		return "", err
 	}
-	signer, err := relayerAddress(src)
+	msg, err := timeoutMessage(src, srcClient, dstClient, sequence, timeout, payloads, proof, proofHeight)
 	if err != nil {
 		return "", err
-	}
-	msg := map[string]any{
-		"@type":            "/ibc.core.channel.v2.MsgTimeout",
-		"packet":           packetMessageWithPayloads(sequence, timeout, srcClient, dstClient, payloads),
-		"proof_unreceived": proof,
-		"proof_height":     proofHeight,
-		"signer":           signer,
 	}
 	hash, err := broadcast(src, emptyTx(msg, "700000"))
 	if err != nil {
@@ -565,6 +605,20 @@ func timeoutPacketWithPayloads(src, dst ChainConfig, srcClient, dstClient string
 		return "", err
 	}
 	return hash, nil
+}
+
+func timeoutMessage(src ChainConfig, srcClient, dstClient string, sequence, timeout int64, payloads []map[string]any, proof string, proofHeight map[string]any) (map[string]any, error) {
+	signer, err := relayerAddress(src)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"@type":            "/ibc.core.channel.v2.MsgTimeout",
+		"packet":           packetMessageWithPayloads(sequence, timeout, srcClient, dstClient, payloads),
+		"proof_unreceived": proof,
+		"proof_height":     proofHeight,
+		"signer":           signer,
+	}, nil
 }
 
 func decodeAcknowledgement(encoded string) (map[string]any, error) {
@@ -691,5 +745,34 @@ func asInt64(v any) (int64, error) {
 		return int64(value), nil
 	default:
 		return 0, fmt.Errorf("not an integer: %v", v)
+	}
+}
+
+func broadcastMessages(chain ChainConfig, messages []map[string]any) (string, error) {
+	if len(messages) == 0 {
+		return "", fmt.Errorf("no messages to broadcast")
+	}
+	gas := 300000 + int64(len(messages))*800000
+	hash, err := broadcast(chain, emptyBatchTx(messages, strconv.FormatInt(gas, 10)))
+	if err != nil {
+		return "", err
+	}
+	// Let the account sequence catch up before the next transaction is signed.
+	waitNextBlock(chain)
+	return hash, nil
+}
+
+func waitNextBlock(chain ChainConfig) {
+	height, err := latestHeight(chain)
+	if err != nil {
+		return
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		current, err := latestHeight(chain)
+		if err == nil && current > height {
+			return
+		}
+		time.Sleep(time.Second)
 	}
 }

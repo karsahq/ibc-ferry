@@ -44,12 +44,12 @@ func TestLiveWatcher(t *testing.T) {
 	}
 	link := links[0]
 
-	var srcClient string
+	var srcClient, dstClient string
 	switch src.Config.ChainID {
 	case link.ChainA:
-		srcClient = link.ClientA
+		srcClient, dstClient = link.ClientA, link.ClientB
 	case link.ChainB:
-		srcClient = link.ClientB
+		srcClient, dstClient = link.ClientB, link.ClientA
 	default:
 		t.Fatalf("source chain %s is not in link %s", src.Config.ChainID, link.ID)
 	}
@@ -64,7 +64,7 @@ func TestLiveWatcher(t *testing.T) {
 	}
 	t.Logf("sent sequence %d timeout %d", sent.Sequence, sent.Timeout)
 
-	opts := relayOptions{LinkID: link.ID, Once: true, Interval: time.Second, Finality: 0, Lookback: 1000}
+	opts := relayOptions{LinkID: link.ID, Once: true, Interval: time.Second, Finality: 0, Lookback: 1000, BatchSize: 10}
 	var packet PacketRecord
 	for cycle := 0; cycle < 4; cycle++ {
 		if err := runRelay(cfg, statePath, opts); err != nil {
@@ -86,6 +86,12 @@ func TestLiveWatcher(t *testing.T) {
 			t.Fatalf("packet %d was not ingested", sent.Sequence)
 		}
 		t.Logf("cycle %d: status=%s recv=%s ack=%s", cycle+1, packet.Status, packet.RecvTxHash, packet.AckTxHash)
+		if packet.Status == PacketRecvSent {
+			receipt, receiptErr := packetReceipt(dst.Config, dstClient, sent.Sequence)
+			ack, ackExists, ackErr := packetAcknowledgement(dst.Config, dstClient, sent.Sequence)
+			t.Logf("debug receipt=%v receiptErr=%v ackExists=%v ackLen=%d ackErr=%v",
+				receipt, receiptErr, ackExists, len(ack), ackErr)
+		}
 		if packet.Status == PacketAcked {
 			break
 		}
@@ -154,7 +160,7 @@ func TestLiveWatcherTimeout(t *testing.T) {
 	time.Sleep(25 * time.Second)
 
 	if err := runRelay(cfg, statePath, relayOptions{
-		LinkID: link.ID, Once: true, Interval: time.Second, Finality: 0, Lookback: 1000,
+		LinkID: link.ID, Once: true, Interval: time.Second, Finality: 0, Lookback: 1000, BatchSize: 10,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -225,6 +231,7 @@ func TestLiveWatcherClientRefresh(t *testing.T) {
 		Finality:      0,
 		Lookback:      1000,
 		ClientRefresh: time.Nanosecond,
+		BatchSize:     10,
 	}); err != nil {
 		t.Fatal(err)
 	}

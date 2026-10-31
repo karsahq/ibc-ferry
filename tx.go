@@ -8,9 +8,17 @@ import (
 )
 
 func emptyTx(message map[string]any, gas string) map[string]any {
+	return emptyBatchTx([]map[string]any{message}, gas)
+}
+
+func emptyBatchTx(messages []map[string]any, gas string) map[string]any {
+	encoded := make([]any, 0, len(messages))
+	for _, message := range messages {
+		encoded = append(encoded, message)
+	}
 	return map[string]any{
 		"body": map[string]any{
-			"messages":                       []any{message},
+			"messages":                       encoded,
 			"memo":                           "",
 			"timeout_height":                 "0",
 			"unordered":                      false,

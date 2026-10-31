@@ -176,10 +176,16 @@ serves status/metrics on `127.0.0.1:8080` by default. Each cycle scans
 `send_packet` and `write_acknowledgement` events, stores new packets in SQLite,
 then decides between recv, ack, and timeout. The defaults are a 5s interval,
 one block of finality, a 1000-block lookback on first run, 7-day retention
-for terminal packets, and a 1-hour client refresh. Use `--interval`,
-`--finality`, `--lookback`, `--retention`, and `--client-refresh` to change
-them; `--retention 0` disables pruning and `--client-refresh 0` disables idle
-client updates. Failed packets get exponential backoff.
+for terminal packets, a 1-hour client refresh, and a batch size of 10. Use
+`--interval`, `--finality`, `--lookback`, `--retention`, `--client-refresh`,
+and `--batch-size` to change them; `--retention 0` disables pruning,
+`--client-refresh 0` disables idle client updates, and `--batch-size 1`
+disables batching. Failed packets get exponential backoff.
+
+Relay actions are grouped by destination chain, client, action, and proof
+height. One client update and one transaction are used per group. If a batch
+fails, the watcher retries its messages individually so one bad packet does
+not block the rest.
 
 Client refresh matters for links with no traffic: an IBC client expires if it
 is never updated during its trusting period. The watcher refreshes both clients
@@ -254,7 +260,8 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 
 - **No automatic repair for orphans.** `doctor` reports orphaned or unlinked
   clients, but `pair` still needs explicit client IDs to repair them.
-- **No batching.** Packets are processed one transaction at a time.
+- **Batching is per proof height.** Packets whose proofs land at different
+  heights use separate transactions.
 - **Status API has no authentication.** Keep it on loopback or place it behind
   an authenticated proxy.
 - **Client updates are driven by recv, ack, and timeout.** The legacy one-shot
@@ -274,6 +281,7 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - Watcher ingestion, recv, ack, and timeout in both directions against the
   live Karsa v11 / Gaia v29 pair.
 - Idle client refresh against the same live pair.
+- A three-packet burst acknowledged in one batch transaction.
 - Status, metrics, and health handlers through unit tests.
 - Terminal packet retention and manual pruning through unit tests.
 
