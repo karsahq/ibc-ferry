@@ -15,14 +15,44 @@ import (
 )
 
 const (
-	schemaVersion       = 1
+	schemaVersion       = 2
 	legacyStateVersion  = 1
 	legacyStateFileName = "links.json"
+)
+
+const (
+	PacketPending  = "pending"
+	PacketRecvSent = "recv_sent"
+	PacketAcked    = "acked"
+	PacketTimedOut = "timed_out"
 )
 
 type legacyStateFile struct {
 	Version int    `json:"version"`
 	Links   []Link `json:"links"`
+}
+
+type PacketRecord struct {
+	LinkID            string
+	Direction         string
+	Sequence          int64
+	SourceClient      string
+	DestinationClient string
+	Payloads          []packetPayload
+	TimeoutTimestamp  int64
+	Status            string
+	SendTxHash        string
+	RecvTxHash        string
+	AckTxHash         string
+	TimeoutTxHash     string
+	Acknowledgement   string
+	ProofHeight       int64
+	AckProofHeight    int64
+	Attempts          int
+	NextAttemptAt     time.Time
+	LastError         string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // LinkStore persists links and relay work in SQLite. Chain definitions stay in
@@ -126,10 +156,27 @@ func (s *LinkStore) migrate() error {
 		return nil
 	}
 
-	for _, stmt := range schemaStatements {
-		if _, err := s.db.Exec(stmt); err != nil {
-			return fmt.Errorf("migrate state %s: %w", s.Path, err)
+	switch version {
+	case 0:
+		for _, stmt := range schemaStatements {
+			if _, err := s.db.Exec(stmt); err != nil {
+				return fmt.Errorf("migrate state %s: %w", s.Path, err)
+			}
 		}
+	case 1:
+		// v1 tracked one scan height per link. The watcher needs one per
+		// chain, and no released watcher has written v1 scan data yet.
+		for _, stmt := range []string{
+			"ALTER TABLE packets ADD COLUMN acknowledgement TEXT",
+			"DROP TABLE IF EXISTS scan_state",
+			createScanStateStatement,
+		} {
+			if _, err := s.db.Exec(stmt); err != nil {
+				return fmt.Errorf("migrate state %s: %w", s.Path, err)
+			}
+		}
+	default:
+		return fmt.Errorf("state %s has unsupported schema version %d", s.Path, version)
 	}
 	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 		return fmt.Errorf("set schema version: %w", err)
@@ -161,6 +208,7 @@ var schemaStatements = []string{
 		recv_tx_hash TEXT,
 		ack_tx_hash TEXT,
 		timeout_tx_hash TEXT,
+		acknowledgement TEXT,
 		proof_height INTEGER,
 		ack_proof_height INTEGER,
 		attempts INTEGER NOT NULL DEFAULT 0,
@@ -171,14 +219,18 @@ var schemaStatements = []string{
 		PRIMARY KEY (link_id, direction, sequence),
 		FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE
 	)`,
-	`CREATE TABLE IF NOT EXISTS scan_state (
-		link_id TEXT PRIMARY KEY,
-		last_scanned_height INTEGER NOT NULL,
-		updated_at TEXT NOT NULL,
-		FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE
-	)`,
+	createScanStateStatement,
 	`CREATE INDEX IF NOT EXISTS packets_pending_idx ON packets(status, next_attempt_at)`,
 }
+
+const createScanStateStatement = `CREATE TABLE IF NOT EXISTS scan_state (
+	link_id TEXT NOT NULL,
+	chain_id TEXT NOT NULL,
+	last_scanned_height INTEGER NOT NULL,
+	updated_at TEXT NOT NULL,
+	PRIMARY KEY (link_id, chain_id),
+	FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE
+)`
 
 func (s *LinkStore) Close() error {
 	return s.db.Close()
@@ -343,11 +395,12 @@ func (s *LinkStore) PacketCounts(linkID string) (map[string]int, error) {
 	return counts, rows.Err()
 }
 
-// ScanHeight returns the last scanned height for a link, if one is recorded.
-func (s *LinkStore) ScanHeight(linkID string) (int64, bool, error) {
+// ScanHeight returns the last scanned height for a link and chain.
+func (s *LinkStore) ScanHeight(linkID, chainID string) (int64, bool, error) {
 	var height int64
 	err := s.db.QueryRow(
-		`SELECT last_scanned_height FROM scan_state WHERE link_id = ?`, linkID,
+		`SELECT last_scanned_height FROM scan_state WHERE link_id = ? AND chain_id = ?`,
+		linkID, chainID,
 	).Scan(&height)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
@@ -356,4 +409,167 @@ func (s *LinkStore) ScanHeight(linkID string) (int64, bool, error) {
 		return 0, false, err
 	}
 	return height, true, nil
+}
+
+func (s *LinkStore) SetScanHeight(linkID, chainID string, height int64) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.Exec(`INSERT INTO scan_state
+		(link_id, chain_id, last_scanned_height, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(link_id, chain_id) DO UPDATE SET
+			last_scanned_height = excluded.last_scanned_height,
+			updated_at = excluded.updated_at`,
+		linkID, chainID, height, now,
+	)
+	return err
+}
+
+// InsertPacket records a packet once. It returns false when the packet was
+// already seen.
+func (s *LinkStore) InsertPacket(packet PacketRecord) (bool, error) {
+	if packet.Payloads == nil {
+		packet.Payloads = []packetPayload{}
+	}
+	payloadJSON, err := json.Marshal(packet.Payloads)
+	if err != nil {
+		return false, err
+	}
+	now := time.Now().UTC()
+	if packet.CreatedAt.IsZero() {
+		packet.CreatedAt = now
+	}
+	if packet.Status == "" {
+		packet.Status = PacketPending
+	}
+	result, err := s.db.Exec(`INSERT OR IGNORE INTO packets
+		(link_id, direction, sequence, source_client, destination_client,
+		 payload_json, timeout_timestamp, status, send_tx_hash, recv_tx_hash,
+		 ack_tx_hash, timeout_tx_hash, acknowledgement, proof_height,
+		 ack_proof_height, attempts, next_attempt_at, last_error,
+		 created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		packet.LinkID, packet.Direction, packet.Sequence,
+		packet.SourceClient, packet.DestinationClient, string(payloadJSON),
+		packet.TimeoutTimestamp, packet.Status,
+		nullableString(packet.SendTxHash), nullableString(packet.RecvTxHash),
+		nullableString(packet.AckTxHash), nullableString(packet.TimeoutTxHash),
+		nullableString(packet.Acknowledgement),
+		nullableInt(packet.ProofHeight), nullableInt(packet.AckProofHeight),
+		packet.Attempts, nullableTime(packet.NextAttemptAt),
+		nullableString(packet.LastError),
+		packet.CreatedAt.UTC().Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+func (s *LinkStore) Packets(linkID string) ([]PacketRecord, error) {
+	rows, err := s.db.Query(`SELECT
+		link_id, direction, sequence, source_client, destination_client,
+		payload_json, timeout_timestamp, status,
+		COALESCE(send_tx_hash, ''), COALESCE(recv_tx_hash, ''),
+		COALESCE(ack_tx_hash, ''), COALESCE(timeout_tx_hash, ''),
+		COALESCE(acknowledgement, ''),
+		COALESCE(proof_height, 0), COALESCE(ack_proof_height, 0),
+		attempts, COALESCE(next_attempt_at, ''), COALESCE(last_error, ''),
+		created_at, updated_at
+		FROM packets WHERE link_id = ? ORDER BY sequence`, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	packets := []PacketRecord{}
+	for rows.Next() {
+		var packet PacketRecord
+		var payloadJSON, nextAttempt, createdAt, updatedAt string
+		if err := rows.Scan(
+			&packet.LinkID, &packet.Direction, &packet.Sequence,
+			&packet.SourceClient, &packet.DestinationClient,
+			&payloadJSON, &packet.TimeoutTimestamp, &packet.Status,
+			&packet.SendTxHash, &packet.RecvTxHash,
+			&packet.AckTxHash, &packet.TimeoutTxHash, &packet.Acknowledgement,
+			&packet.ProofHeight, &packet.AckProofHeight,
+			&packet.Attempts, &nextAttempt, &packet.LastError,
+			&createdAt, &updatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(payloadJSON), &packet.Payloads); err != nil {
+			return nil, fmt.Errorf("decode payload for packet %d: %w", packet.Sequence, err)
+		}
+		if nextAttempt != "" {
+			packet.NextAttemptAt, err = time.Parse(time.RFC3339Nano, nextAttempt)
+			if err != nil {
+				return nil, err
+			}
+		}
+		packet.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			return nil, err
+		}
+		packet.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
+		if err != nil {
+			return nil, err
+		}
+		packets = append(packets, packet)
+	}
+	return packets, rows.Err()
+}
+
+func (s *LinkStore) UpdatePacket(packet PacketRecord) error {
+	_, err := s.db.Exec(`UPDATE packets SET
+		status = ?, send_tx_hash = ?, recv_tx_hash = ?, ack_tx_hash = ?,
+		timeout_tx_hash = ?, acknowledgement = ?, proof_height = ?,
+		ack_proof_height = ?, attempts = ?, next_attempt_at = ?,
+		last_error = ?, updated_at = ?
+		WHERE link_id = ? AND direction = ? AND sequence = ?`,
+		packet.Status,
+		nullableString(packet.SendTxHash), nullableString(packet.RecvTxHash),
+		nullableString(packet.AckTxHash), nullableString(packet.TimeoutTxHash),
+		nullableString(packet.Acknowledgement),
+		nullableInt(packet.ProofHeight), nullableInt(packet.AckProofHeight),
+		packet.Attempts, nullableTime(packet.NextAttemptAt),
+		nullableString(packet.LastError),
+		time.Now().UTC().Format(time.RFC3339Nano),
+		packet.LinkID, packet.Direction, packet.Sequence,
+	)
+	return err
+}
+
+func (s *LinkStore) SetPacketAcknowledgement(linkID, direction string, sequence int64, acknowledgement string) error {
+	_, err := s.db.Exec(`UPDATE packets SET acknowledgement = ?, updated_at = ?
+		WHERE link_id = ? AND direction = ? AND sequence = ?`,
+		nullableString(acknowledgement), time.Now().UTC().Format(time.RFC3339Nano),
+		linkID, direction, sequence,
+	)
+	return err
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func nullableInt(value int64) any {
+	if value == 0 {
+		return nil
+	}
+	return value
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }

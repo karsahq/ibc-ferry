@@ -265,11 +265,15 @@ func getProof(src ChainConfig, srcClient string, sequence int64) (proof, error) 
 }
 
 func recvPacket(dst ChainConfig, dstClient string, srcClient string, sequence, timeout int64, payload, proofHeight map[string]any, commitment string) (string, string, error) {
+	return recvPacketWithPayloads(dst, dstClient, srcClient, sequence, timeout, []map[string]any{payload}, proofHeight, commitment)
+}
+
+func recvPacketWithPayloads(dst ChainConfig, dstClient string, srcClient string, sequence, timeout int64, payloads []map[string]any, proofHeight map[string]any, commitment string) (string, string, error) {
 	signer, err := relayerAddress(dst)
 	if err != nil {
 		return "", "", err
 	}
-	packet := packetMessage(sequence, timeout, srcClient, dstClient, payload)
+	packet := packetMessageWithPayloads(sequence, timeout, srcClient, dstClient, payloads)
 	msg := map[string]any{
 		"@type":            "/ibc.core.channel.v2.MsgRecvPacket",
 		"packet":           packet,
@@ -415,6 +419,10 @@ func getAckProof(dst ChainConfig, dstClient string, sequence int64) (string, map
 }
 
 func ackPacket(src, dst ChainConfig, srcClient, dstClient string, sequence, timeout int64, payload map[string]any, ack, proof string, proofHeight map[string]any) (string, error) {
+	return ackPacketWithPayloads(src, dst, srcClient, dstClient, sequence, timeout, []map[string]any{payload}, ack, proof, proofHeight)
+}
+
+func ackPacketWithPayloads(src, dst ChainConfig, srcClient, dstClient string, sequence, timeout int64, payloads []map[string]any, ack, proof string, proofHeight map[string]any) (string, error) {
 	height, err := asInt64(proofHeight["revision_height"])
 	if err != nil {
 		return "", err
@@ -426,7 +434,7 @@ func ackPacket(src, dst ChainConfig, srcClient, dstClient string, sequence, time
 	if err != nil {
 		return "", err
 	}
-	packet := packetMessage(sequence, timeout, srcClient, dstClient, payload)
+	packet := packetMessageWithPayloads(sequence, timeout, srcClient, dstClient, payloads)
 	ackMessage, err := decodeAcknowledgement(ack)
 	if err != nil {
 		return "", err
@@ -450,12 +458,20 @@ func ackPacket(src, dst ChainConfig, srcClient, dstClient string, sequence, time
 }
 
 func packetMessage(sequence, timeout int64, srcClient, dstClient string, payload map[string]any) map[string]any {
+	return packetMessageWithPayloads(sequence, timeout, srcClient, dstClient, []map[string]any{payload})
+}
+
+func packetMessageWithPayloads(sequence, timeout int64, srcClient, dstClient string, payloads []map[string]any) map[string]any {
+	values := make([]any, 0, len(payloads))
+	for _, payload := range payloads {
+		values = append(values, payload)
+	}
 	return map[string]any{
 		"sequence":           strconv.FormatInt(sequence, 10),
 		"source_client":      srcClient,
 		"destination_client": dstClient,
 		"timeout_timestamp":  strconv.FormatInt(timeout, 10),
-		"payloads":           []any{payload},
+		"payloads":           values,
 	}
 }
 
@@ -519,6 +535,10 @@ func ensureClientAtHeight(chain, counterparty ChainConfig, clientID string, heig
 }
 
 func timeoutPacket(src, dst ChainConfig, srcClient, dstClient string, sequence, timeout int64, payload map[string]any, proof string, proofHeight map[string]any) (string, error) {
+	return timeoutPacketWithPayloads(src, dst, srcClient, dstClient, sequence, timeout, []map[string]any{payload}, proof, proofHeight)
+}
+
+func timeoutPacketWithPayloads(src, dst ChainConfig, srcClient, dstClient string, sequence, timeout int64, payloads []map[string]any, proof string, proofHeight map[string]any) (string, error) {
 	height, err := asInt64(proofHeight["revision_height"])
 	if err != nil {
 		return "", err
@@ -532,7 +552,7 @@ func timeoutPacket(src, dst ChainConfig, srcClient, dstClient string, sequence, 
 	}
 	msg := map[string]any{
 		"@type":            "/ibc.core.channel.v2.MsgTimeout",
-		"packet":           packetMessage(sequence, timeout, srcClient, dstClient, payload),
+		"packet":           packetMessageWithPayloads(sequence, timeout, srcClient, dstClient, payloads),
 		"proof_unreceived": proof,
 		"proof_height":     proofHeight,
 		"signer":           signer,

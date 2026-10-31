@@ -219,12 +219,14 @@ func (r *doctorReport) checkLink(store *LinkStore, link Link, chainByID map[stri
 		}
 	}
 
-	if height, ok, err := store.ScanHeight(link.ID); err != nil {
-		r.add(doctorError, link.ID, "scan state: %v", err)
-	} else if ok {
-		r.add(doctorInfo, link.ID, "last scanned height %d", height)
-	} else {
-		r.add(doctorInfo, link.ID, "no scan height recorded")
+	for _, chainID := range []string{link.ChainA, link.ChainB} {
+		if height, ok, err := store.ScanHeight(link.ID, chainID); err != nil {
+			r.add(doctorError, link.ID, "scan state for %s: %v", chainID, err)
+		} else if ok {
+			r.add(doctorInfo, link.ID, "last scanned %s height %d", chainID, height)
+		} else {
+			r.add(doctorInfo, link.ID, "no scan height for %s", chainID)
+		}
 	}
 }
 

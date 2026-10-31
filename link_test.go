@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -241,8 +242,8 @@ func TestLinkStorePacketCountsAndScanHeight(t *testing.T) {
 		}
 	}
 	if _, err := store.db.Exec(
-		`INSERT INTO scan_state (link_id, last_scanned_height, updated_at) VALUES (?, ?, ?)`,
-		link.ID, 42, now,
+		`INSERT INTO scan_state (link_id, chain_id, last_scanned_height, updated_at) VALUES (?, ?, ?, ?)`,
+		link.ID, "chain-a", 42, now,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -254,11 +255,87 @@ func TestLinkStorePacketCountsAndScanHeight(t *testing.T) {
 	if counts["pending"] != 2 || counts["acked"] != 1 {
 		t.Fatalf("packet counts = %v", counts)
 	}
-	height, ok, err := store.ScanHeight(link.ID)
+	height, ok, err := store.ScanHeight(link.ID, "chain-a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !ok || height != 42 {
 		t.Fatalf("scan height = %d, %v; want 42, true", height, ok)
+	}
+}
+
+func TestLinkStorePacketRoundTrip(t *testing.T) {
+	store, err := openLinkStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	link, err := NewLink("chain-a", "07-tendermint-0", "chain-b", "07-tendermint-0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(link); err != nil {
+		t.Fatal(err)
+	}
+
+	record := PacketRecord{
+		LinkID:            link.ID,
+		Direction:         directionAToB,
+		Sequence:          3,
+		SourceClient:      link.ClientA,
+		DestinationClient: link.ClientB,
+		Payloads: []packetPayload{{
+			SourcePort: "transfer", DestinationPort: "transfer",
+			Version: "ics20-1", Encoding: "application/json",
+			Value: base64.StdEncoding.EncodeToString([]byte(`{"denom":"akra"}`)),
+		}},
+		TimeoutTimestamp: 1234,
+		Status:           PacketPending,
+	}
+	inserted, err := store.InsertPacket(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inserted {
+		t.Fatal("first insert did not add a row")
+	}
+	inserted, err = store.InsertPacket(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inserted {
+		t.Fatal("duplicate insert added a row")
+	}
+
+	packets, err := store.Packets(link.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packets) != 1 || len(packets[0].Payloads) != 1 {
+		t.Fatalf("packets = %+v", packets)
+	}
+	packets[0].Status = PacketRecvSent
+	packets[0].RecvTxHash = "ABC"
+	if err := store.UpdatePacket(packets[0]); err != nil {
+		t.Fatal(err)
+	}
+	packets, err = store.Packets(link.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if packets[0].Status != PacketRecvSent || packets[0].RecvTxHash != "ABC" {
+		t.Fatalf("updated packet = %+v", packets[0])
+	}
+
+	if err := store.SetScanHeight(link.ID, "chain-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	height, ok, err := store.ScanHeight(link.ID, "chain-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || height != 10 {
+		t.Fatalf("scan height = %d, %v", height, ok)
 	}
 }

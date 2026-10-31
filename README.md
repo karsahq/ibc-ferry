@@ -86,6 +86,9 @@ ibc-ferry --config config.toml link <link-id>
 ibc-ferry --config config.toml connect <chain-a> <chain-b>
 ibc-ferry --config config.toml pair <chain-a> <client-a> <chain-b> <client-b>
 ibc-ferry --config config.toml doctor [--strict]
+ibc-ferry --config config.toml relay --link <link-id> --once
+ibc-ferry --config config.toml relay --link <link-id>
+ibc-ferry --config config.toml start
 ```
 
 With the default config path in place, `--config` can be omitted.
@@ -103,6 +106,14 @@ new client instead.
 `doctor` checks configured chains, relayer balances, stored links, client
 status, trust-period remaining, orphan/unlinked clients, and packet counts from
 SQLite. Errors make it exit non-zero; `--strict` also fails on warnings.
+
+`relay --once` runs one scan-and-relay cycle; without `--once` it keeps
+running for the selected link. `start` runs the loop for every stored link.
+Each cycle scans `send_packet` and `write_acknowledgement` events, stores new
+packets in SQLite, then decides between recv, ack, and timeout. The defaults
+are a 5s interval, one block of finality, and a 1000-block lookback on first
+run; use `--interval`, `--finality`, and `--lookback` to change them. Failed
+packets get exponential backoff.
 
 `--state <file>` overrides the SQLite state path. The default is
 `~/.local/state/ibc-ferry/state.db` (or `$XDG_STATE_HOME/ibc-ferry/state.db`),
@@ -123,7 +134,7 @@ schema contains:
 |---|---|
 | `links` | Client pairs and their status |
 | `packets` | Packet work queue, tx hashes, proof heights and retry state |
-| `scan_state` | Last scanned height per link |
+| `scan_state` | Last scanned height per link and chain |
 
 Schema migrations run automatically on open. A `links.json` file from the
 earlier prototype is imported on first open of the default state path; existing
@@ -142,6 +153,8 @@ and broadcast them:
 MsgCreateClient
 MsgSendPacket
 MsgRecvPacket
+MsgAcknowledgement
+MsgTimeout
 ```
 
 This avoids compiling against one SDK/ibc-go version for both chains. It has
@@ -149,15 +162,14 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 
 ## Limitations
 
-- **Timeout is not wired to a command yet.** The non-membership proof,
-  client update, and `MsgTimeout` path is implemented and live-tested, but the
-  watcher that decides when to use it is still pending.
 - **No automatic repair for orphans.** `doctor` reports orphaned or unlinked
   clients, but `pair` still needs explicit client IDs to repair them.
-- **Client updates are driven by acks and timeouts.** The legacy one-shot mode
-  still creates a fresh destination client per run; use a new client ID for
-  the next run.
-- **No retry loop or batching.** One packet per invocation.
+- **No batching.** Packets are processed one transaction at a time.
+- **No metrics or status API yet.** Progress is visible through logs, SQLite,
+  and `ferry doctor`.
+- **Client updates are driven by recv, ack, and timeout.** The legacy one-shot
+  mode still creates a fresh destination client per run; use a new client ID
+  for the next run.
 - **Experimental.** Not production relayer software.
 
 ## Tested
@@ -167,18 +179,20 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - Receive, client update, and acknowledgement relay in both directions.
 - Idempotent `connect` and `pair` against a live Karsa v11 / Gaia v29 pair.
 - `doctor` clean and broken-link detection against the same live pair.
-- Short-timeout Karsa -> Gaia packet with a non-membership proof and a
-  successful `MsgTimeout` relay.
+- Short-timeout packets with a non-membership proof and a successful
+  `MsgTimeout` relay in both directions.
+- Watcher ingestion, recv, ack, and timeout in both directions against the
+  live Karsa v11 / Gaia v29 pair.
 
 Harnesses live in `examples/`. They expect the Karsa checkout at
 `../karsa` by default; override with `KARSA_ROOT=/path/to/karsa`.
 
-The live timeout test is opt-in:
+The live timeout and watcher tests are opt-in:
 
 ```bash
 FERRY_LIVE_CONFIG=... FERRY_LIVE_STATE=... \
 FERRY_LIVE_SRC=karsa FERRY_LIVE_DST=gaia FERRY_LIVE_DENOM=akra \
-go test -tags=live -run TestLiveTimeout -v
+go test -tags=live -run 'TestLive(Timeout|Watcher)' -v
 ```
 
 ## Status
