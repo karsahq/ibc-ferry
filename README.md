@@ -56,8 +56,8 @@ keyring homes for the chains you want to relay; the same image works for any
 Cosmos chain.
 
 Image: `ghcr.io/karsahq/ibc-ferry` (tags: `main`, `sha-...`, version tags, and
-`latest` for version tags). For a private package, run `podman login ghcr.io`
-first.
+`latest` tracking `main`). Pin a version tag for production. For a private
+package, run `podman login ghcr.io` first.
 
 Podman:
 
