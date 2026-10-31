@@ -149,12 +149,14 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 
 ## Limitations
 
-- **No timeout relay yet.** The v2 receipt query used by this CLI path does not
-  return the non-membership proof required by `MsgTimeout`. Acks are supported.
+- **Timeout is not wired to a command yet.** The non-membership proof,
+  client update, and `MsgTimeout` path is implemented and live-tested, but the
+  watcher that decides when to use it is still pending.
 - **No automatic repair for orphans.** `doctor` reports orphaned or unlinked
   clients, but `pair` still needs explicit client IDs to repair them.
-- **Client updates are only for acknowledgements.** A fresh destination client
-  is still created per one-shot run; use a new client ID for the next run.
+- **Client updates are driven by acks and timeouts.** The legacy one-shot mode
+  still creates a fresh destination client per run; use a new client ID for
+  the next run.
 - **No retry loop or batching.** One packet per invocation.
 - **Experimental.** Not production relayer software.
 
@@ -165,9 +167,19 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - Receive, client update, and acknowledgement relay in both directions.
 - Idempotent `connect` and `pair` against a live Karsa v11 / Gaia v29 pair.
 - `doctor` clean and broken-link detection against the same live pair.
+- Short-timeout Karsa -> Gaia packet with a non-membership proof and a
+  successful `MsgTimeout` relay.
 
 Harnesses live in `examples/`. They expect the Karsa checkout at
 `../karsa` by default; override with `KARSA_ROOT=/path/to/karsa`.
+
+The live timeout test is opt-in:
+
+```bash
+FERRY_LIVE_CONFIG=... FERRY_LIVE_STATE=... \
+FERRY_LIVE_SRC=karsa FERRY_LIVE_DST=gaia FERRY_LIVE_DENOM=akra \
+go test -tags=live -run TestLiveTimeout -v
+```
 
 ## Status
 

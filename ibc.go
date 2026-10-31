@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -12,6 +13,11 @@ import (
 )
 
 const merklePrefix = "aWJj" // base64("ibc")
+
+var (
+	errPacketReceived    = errors.New("packet already received")
+	errTimeoutNotReached = errors.New("timeout not reached")
+)
 
 func createClient(chain, counterparty ChainConfig, height int64) (string, int64, error) {
 	if height == 0 {
@@ -162,6 +168,10 @@ type sendResult struct {
 }
 
 func sendPacket(src ChainConfig, srcClient, denom, amount, receiver string) (sendResult, error) {
+	return sendPacketWithTimeout(src, srcClient, denom, amount, receiver, 600)
+}
+
+func sendPacketWithTimeout(src ChainConfig, srcClient, denom, amount, receiver string, timeoutSeconds int64) (sendResult, error) {
 	height, err := latestHeight(src)
 	if err != nil {
 		return sendResult{}, err
@@ -174,7 +184,7 @@ func sendPacket(src ChainConfig, srcClient, denom, amount, receiver string) (sen
 	if err != nil {
 		return sendResult{}, fmt.Errorf("parse block time: %w", err)
 	}
-	timeout := blockTime.Unix() + 600
+	timeout := blockTime.Unix() + timeoutSeconds
 	signer, err := relayerAddress(src)
 	if err != nil {
 		return sendResult{}, err
@@ -259,13 +269,7 @@ func recvPacket(dst ChainConfig, dstClient string, srcClient string, sequence, t
 	if err != nil {
 		return "", "", err
 	}
-	packet := map[string]any{
-		"sequence":           strconv.FormatInt(sequence, 10),
-		"source_client":      srcClient,
-		"destination_client": dstClient,
-		"timeout_timestamp":  strconv.FormatInt(timeout, 10),
-		"payloads":           []any{payload},
-	}
+	packet := packetMessage(sequence, timeout, srcClient, dstClient, payload)
 	msg := map[string]any{
 		"@type":            "/ibc.core.channel.v2.MsgRecvPacket",
 		"packet":           packet,
@@ -422,13 +426,7 @@ func ackPacket(src, dst ChainConfig, srcClient, dstClient string, sequence, time
 	if err != nil {
 		return "", err
 	}
-	packet := map[string]any{
-		"sequence":           strconv.FormatInt(sequence, 10),
-		"source_client":      srcClient,
-		"destination_client": dstClient,
-		"timeout_timestamp":  strconv.FormatInt(timeout, 10),
-		"payloads":           []any{payload},
-	}
+	packet := packetMessage(sequence, timeout, srcClient, dstClient, payload)
 	ackMessage, err := decodeAcknowledgement(ack)
 	if err != nil {
 		return "", err
@@ -440,6 +438,104 @@ func ackPacket(src, dst ChainConfig, srcClient, dstClient string, sequence, time
 		"proof_acked":     proof,
 		"proof_height":    proofHeight,
 		"signer":          signer,
+	}
+	hash, err := broadcast(src, emptyTx(msg, "700000"))
+	if err != nil {
+		return "", err
+	}
+	if err := waitTx(src, hash); err != nil {
+		return "", err
+	}
+	return hash, nil
+}
+
+func packetMessage(sequence, timeout int64, srcClient, dstClient string, payload map[string]any) map[string]any {
+	return map[string]any{
+		"sequence":           strconv.FormatInt(sequence, 10),
+		"source_client":      srcClient,
+		"destination_client": dstClient,
+		"timeout_timestamp":  strconv.FormatInt(timeout, 10),
+		"payloads":           []any{payload},
+	}
+}
+
+func getTimeoutProof(dst ChainConfig, dstClient string, sequence, timeout int64) (string, map[string]any, int64, error) {
+	res, err := queryJSON(
+		dst, "ibc", "channelv2", "packet-receipt",
+		dstClient, strconv.FormatInt(sequence, 10), "--prove",
+	)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	if received, _ := res["received"].(bool); received {
+		return "", nil, 0, errPacketReceived
+	}
+	proof, _ := res["proof"].(string)
+	proofHeight, _ := res["proof_height"].(map[string]any)
+	if proof == "" || proofHeight == nil {
+		return "", nil, 0, fmt.Errorf("timeout proof query returned incomplete data: %v", res)
+	}
+	height, err := asInt64(proofHeight["revision_height"])
+	if err != nil {
+		return "", nil, 0, fmt.Errorf("timeout proof height: %w", err)
+	}
+
+	for {
+		current, err := latestHeight(dst)
+		if err != nil {
+			return "", nil, 0, err
+		}
+		if current >= height {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	header, err := blockAt(dst, height)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	blockTime, err := time.Parse(time.RFC3339Nano, header.Time)
+	if err != nil {
+		return "", nil, 0, fmt.Errorf("parse proof block time: %w", err)
+	}
+	if blockTime.Unix() < timeout {
+		return "", nil, 0, fmt.Errorf(
+			"%w: proof time %d is before timeout %d",
+			errTimeoutNotReached, blockTime.Unix(), timeout,
+		)
+	}
+	return proof, proofHeight, height, nil
+}
+
+func ensureClientAtHeight(chain, counterparty ChainConfig, clientID string, height int64) error {
+	_, trustedHeight, err := clientLatestHeight(chain, clientID)
+	if err != nil {
+		return err
+	}
+	if height <= trustedHeight {
+		return nil
+	}
+	return updateClient(chain, counterparty, clientID, height)
+}
+
+func timeoutPacket(src, dst ChainConfig, srcClient, dstClient string, sequence, timeout int64, payload map[string]any, proof string, proofHeight map[string]any) (string, error) {
+	height, err := asInt64(proofHeight["revision_height"])
+	if err != nil {
+		return "", err
+	}
+	if err := ensureClientAtHeight(src, dst, srcClient, height); err != nil {
+		return "", err
+	}
+	signer, err := relayerAddress(src)
+	if err != nil {
+		return "", err
+	}
+	msg := map[string]any{
+		"@type":            "/ibc.core.channel.v2.MsgTimeout",
+		"packet":           packetMessage(sequence, timeout, srcClient, dstClient, payload),
+		"proof_unreceived": proof,
+		"proof_height":     proofHeight,
+		"signer":           signer,
 	}
 	hash, err := broadcast(src, emptyTx(msg, "700000"))
 	if err != nil {
