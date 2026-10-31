@@ -85,6 +85,7 @@ ibc-ferry --config config.toml links [--chain <name-or-chain-id>]
 ibc-ferry --config config.toml link <link-id>
 ibc-ferry --config config.toml connect <chain-a> <chain-b>
 ibc-ferry --config config.toml pair <chain-a> <client-a> <chain-b> <client-b>
+ibc-ferry --config config.toml doctor [--strict]
 ```
 
 With the default config path in place, `--config` can be omitted.
@@ -98,6 +99,10 @@ that is already registered to a different client.
 The chain requires the same relayer key that created a client to register its
 counterparty. If a client was created by another key, use that key or create a
 new client instead.
+
+`doctor` checks configured chains, relayer balances, stored links, client
+status, trust-period remaining, orphan/unlinked clients, and packet counts from
+SQLite. Errors make it exit non-zero; `--strict` also fails on warnings.
 
 `--state <file>` overrides the SQLite state path. The default is
 `~/.local/state/ibc-ferry/state.db` (or `$XDG_STATE_HOME/ibc-ferry/state.db`),
@@ -146,9 +151,8 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 
 - **No timeout relay yet.** The v2 receipt query used by this CLI path does not
   return the non-membership proof required by `MsgTimeout`. Acks are supported.
-- **No doctor yet.** `connect` and `pair` are idempotent, but cross-chain
-  transactions are not atomic. A failure after creating one client can leave an
-  orphan; `ferry doctor` will report these once implemented.
+- **No automatic repair for orphans.** `doctor` reports orphaned or unlinked
+  clients, but `pair` still needs explicit client IDs to repair them.
 - **Client updates are only for acknowledgements.** A fresh destination client
   is still created per one-shot run; use a new client ID for the next run.
 - **No retry loop or batching.** One packet per invocation.
@@ -160,6 +164,7 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - Karsa -> Gaia v29 and Gaia v29 -> Karsa, native ICS20 v2 transfer.
 - Receive, client update, and acknowledgement relay in both directions.
 - Idempotent `connect` and `pair` against a live Karsa v11 / Gaia v29 pair.
+- `doctor` clean and broken-link detection against the same live pair.
 
 Harnesses live in `examples/`. They expect the Karsa checkout at
 `../karsa` by default; override with `KARSA_ROOT=/path/to/karsa`.

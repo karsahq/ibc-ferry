@@ -7,12 +7,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type clientInfo struct {
-	ID           string
-	ChainID      string
-	LatestHeight int64
+	ID             string
+	ChainID        string
+	LatestHeight   int64
+	TrustingPeriod time.Duration
 }
 
 type clientPair struct {
@@ -318,9 +320,11 @@ func parseClientStates(res map[string]any) []clientInfo {
 		if clientID == "" || clientState == nil {
 			continue
 		}
+		trustingPeriod, _ := time.ParseDuration(str(clientState["trusting_period"]))
 		client := clientInfo{
-			ID:      clientID,
-			ChainID: str(clientState["chain_id"]),
+			ID:             clientID,
+			ChainID:        str(clientState["chain_id"]),
+			TrustingPeriod: trustingPeriod,
 		}
 		if latest, ok := clientState["latest_height"].(map[string]any); ok {
 			if height, err := asInt64(latest["revision_height"]); err == nil {
@@ -335,6 +339,9 @@ func parseClientStates(res map[string]any) []clientInfo {
 func clientStateInfo(chain ChainConfig, clientID string) (clientInfo, error) {
 	res, err := queryJSON(chain, "ibc", "client", "state", clientID)
 	if err != nil {
+		if isNotFound(err) {
+			return clientInfo{}, fmt.Errorf("client %s not found", clientID)
+		}
 		return clientInfo{}, err
 	}
 	clientState, _ := res["client_state"].(map[string]any)
@@ -345,7 +352,12 @@ func clientStateInfo(chain ChainConfig, clientID string) (clientInfo, error) {
 	if chainID == "" {
 		return clientInfo{}, fmt.Errorf("client %s on %s has no chain_id", clientID, chain.ChainID)
 	}
-	client := clientInfo{ID: clientID, ChainID: chainID}
+	trustingPeriod, _ := time.ParseDuration(str(clientState["trusting_period"]))
+	client := clientInfo{
+		ID:             clientID,
+		ChainID:        chainID,
+		TrustingPeriod: trustingPeriod,
+	}
 	if latest, ok := clientState["latest_height"].(map[string]any); ok {
 		if height, err := asInt64(latest["revision_height"]); err == nil {
 			client.LatestHeight = height

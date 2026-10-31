@@ -204,3 +204,61 @@ func TestLinkStoreImportsLegacyJSON(t *testing.T) {
 		t.Fatalf("id = %q, want %q", got.ID, link.ID)
 	}
 }
+
+func TestLinkStorePacketCountsAndScanHeight(t *testing.T) {
+	store, err := openLinkStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	link, err := NewLink("chain-a", "07-tendermint-0", "chain-b", "07-tendermint-0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(link); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, packet := range []struct {
+		sequence int
+		status   string
+	}{
+		{sequence: 1, status: "pending"},
+		{sequence: 2, status: "pending"},
+		{sequence: 3, status: "acked"},
+	} {
+		_, err := store.db.Exec(`INSERT INTO packets
+			(link_id, direction, sequence, source_client, destination_client,
+			 payload_json, timeout_timestamp, status, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			link.ID, "a_to_b", packet.sequence, link.ClientA, link.ClientB,
+			"{}", 0, packet.status, now, now,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.db.Exec(
+		`INSERT INTO scan_state (link_id, last_scanned_height, updated_at) VALUES (?, ?, ?)`,
+		link.ID, 42, now,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	counts, err := store.PacketCounts(link.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts["pending"] != 2 || counts["acked"] != 1 {
+		t.Fatalf("packet counts = %v", counts)
+	}
+	height, ok, err := store.ScanHeight(link.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || height != 42 {
+		t.Fatalf("scan height = %d, %v; want 42, true", height, ok)
+	}
+}

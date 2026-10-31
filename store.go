@@ -319,3 +319,41 @@ func (s *LinkStore) importLegacyJSON(path string) error {
 func formatStatus(status LinkStatus) string {
 	return strings.ToUpper(string(status))
 }
+
+// PacketCounts returns packet counts grouped by status for a link.
+func (s *LinkStore) PacketCounts(linkID string) (map[string]int, error) {
+	rows, err := s.db.Query(
+		`SELECT status, COUNT(*) FROM packets WHERE link_id = ? GROUP BY status`,
+		linkID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		counts[status] = count
+	}
+	return counts, rows.Err()
+}
+
+// ScanHeight returns the last scanned height for a link, if one is recorded.
+func (s *LinkStore) ScanHeight(linkID string) (int64, bool, error) {
+	var height int64
+	err := s.db.QueryRow(
+		`SELECT last_scanned_height FROM scan_state WHERE link_id = ?`, linkID,
+	).Scan(&height)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return height, true, nil
+}

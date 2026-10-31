@@ -46,6 +46,8 @@ func main() {
 		err = cmdConnect(cfg, *statePath, args[1:])
 	case "pair":
 		err = cmdPair(cfg, *statePath, args[1:])
+	case "doctor":
+		err = cmdDoctor(cfg, *statePath, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "ibc-ferry: unknown command %q\n\n", args[0])
 		flag.Usage()
@@ -69,6 +71,7 @@ func usage() {
 	fmt.Fprintln(out, "  connect <chain-a> <chain-b>  create or reuse clients and pair them")
 	fmt.Fprintln(out, "  pair <chain-a> <client-a> <chain-b> <client-b>")
 	fmt.Fprintln(out, "                               verify and persist an existing client pair")
+	fmt.Fprintln(out, "  doctor [--strict]            check links, clients, balances and packet state")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Global flags:")
 	flag.PrintDefaults()
