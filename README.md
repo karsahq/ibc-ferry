@@ -189,6 +189,11 @@ burst of packets can be received in one transaction. `--finality 0` falls back
 to per-packet proofs. If a batch fails, the watcher retries its messages
 individually so one bad packet does not block the rest.
 
+When the acknowledgement bytes are missing from local state, for example when
+another relayer received the packet, the watcher searches the destination
+chain's transaction index for the `write_acknowledgement` event and recovers
+the original ack before relaying it.
+
 Client refresh matters for links with no traffic: an IBC client expires if it
 is never updated during its trusting period. The watcher refreshes both clients
 periodically, not only when a packet needs relaying.
@@ -264,6 +269,9 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
   clients, but `pair` still needs explicit client IDs to repair them.
 - **Batching is per proof height.** With `--finality 0`, or when a proof at
   the common height is unavailable, packets may use separate transactions.
+- **Ack recovery needs the transaction indexer.** If the destination node runs
+  with the CometBFT indexer disabled, ack bytes cannot be recovered from
+  `write_acknowledgement` events outside the scan window.
 - **Status API has no authentication.** Keep it on loopback or place it behind
   an authenticated proxy.
 - **Client updates are driven by recv, ack, and timeout.** The legacy one-shot
@@ -285,6 +293,8 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - Idle client refresh against the same live pair.
 - A three-packet burst received in one transaction and acknowledged in one
   transaction.
+- Acknowledgement bytes recovered from the transaction index after a packet
+  was received by another relayer.
 - Status, metrics, and health handlers through unit tests.
 - Terminal packet retention and manual pruning through unit tests.
 

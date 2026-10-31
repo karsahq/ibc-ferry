@@ -348,20 +348,10 @@ func blockEvents(chain ChainConfig, height int64) ([]blockEvent, error) {
 		rawEvents, _ := tx["events"].([]any)
 		for _, rawEvent := range rawEvents {
 			event, _ := rawEvent.(map[string]any)
-			attributes := make(map[string]string)
-			rawAttributes, _ := event["attributes"].([]any)
-			for _, rawAttribute := range rawAttributes {
-				attribute, _ := rawAttribute.(map[string]any)
-				key, encoded := decodeAttributeText(str(attribute["key"]))
-				value := str(attribute["value"])
-				if encoded {
-					value, _ = decodeAttributeText(value)
-				}
-				attributes[key] = value
-			}
+			attributes, _ := event["attributes"].([]any)
 			events = append(events, blockEvent{
 				Type:       str(event["type"]),
-				Attributes: attributes,
+				Attributes: attributeMap(attributes),
 			})
 		}
 	}
@@ -371,6 +361,20 @@ func blockEvents(chain ChainConfig, height int64) ([]blockEvent, error) {
 type blockEvent struct {
 	Type       string
 	Attributes map[string]string
+}
+
+func attributeMap(rawAttributes []any) map[string]string {
+	attributes := make(map[string]string, len(rawAttributes))
+	for _, rawAttribute := range rawAttributes {
+		attribute, _ := rawAttribute.(map[string]any)
+		key, encoded := decodeAttributeText(str(attribute["key"]))
+		value := str(attribute["value"])
+		if encoded {
+			value, _ = decodeAttributeText(value)
+		}
+		attributes[key] = value
+	}
+	return attributes
 }
 
 // Some CometBFT versions base64-encode block_results attributes and some
@@ -473,13 +477,15 @@ func preparePacket(cfg Config, link Link, packet PacketRecord, finality int64, p
 	if ackExists {
 		ack := packet.Acknowledgement
 		if ack == "" && packet.RecvTxHash != "" {
-			ack, err = recvAcknowledgementForSequence(dst.Config, packet.RecvTxHash, packet.Sequence)
-			if err != nil {
-				return preparedPacket{}, fmt.Errorf("read acknowledgement from recv tx: %w", err)
-			}
+			ack, _ = recvAcknowledgementForSequence(dst.Config, packet.RecvTxHash, packet.Sequence)
 		}
 		if ack == "" {
-			return preparedPacket{}, fmt.Errorf("acknowledgement bytes not captured yet")
+			ack, err = recoverAcknowledgement(dst.Config, dstClient, packet.Sequence)
+			if err != nil {
+				return preparedPacket{}, fmt.Errorf("recover acknowledgement: %w", err)
+			}
+			log.Printf("relay: %s packet %s/%d: recovered acknowledgement from tx index",
+				link.ID, packet.Direction, packet.Sequence)
 		}
 		proof, proofHeight, height, err := getAckProof(dst.Config, dstClient, packet.Sequence)
 		if err != nil {
