@@ -48,6 +48,67 @@ the database as configuration.
 go build -o ibc-ferry .
 ```
 
+## Container image
+
+The published image contains only `ibc-ferry`. It deliberately does **not**
+bundle `karsad`, `gaiad`, or any other chain binary. Mount the binaries and
+keyring homes for the chains you want to relay; the same image works for any
+Cosmos chain.
+
+Image: `ghcr.io/karsahq/ibc-ferry` (tags: `main`, `sha-...`, version tags, and
+`latest` for version tags). For a private package, run `podman login ghcr.io`
+first.
+
+Podman:
+
+```bash
+mkdir -p bin chains/karsa chains/gaia
+cp /path/to/karsad bin/
+cp /path/to/gaiad bin/
+
+# Create the relayer key inside the mounted home, with the chain binary you
+# already placed in bin/. Use a dedicated relayer home, not a validator home.
+bin/karsad keys add ferry --home chains/karsa --keyring-backend file
+bin/gaiad keys add ferry --home chains/gaia --keyring-backend file
+
+podman compose -f compose.podman.yaml pull
+podman compose -f compose.podman.yaml up -d
+```
+
+Docker:
+
+```bash
+docker compose -f compose.yaml up -d
+```
+
+The compose files default to `config.container.podman.toml` and
+`config.container.docker.toml`. Override paths with `FERRY_CONFIG`,
+`FERRY_BIN_DIR`, and `FERRY_CHAINS_DIR`.
+
+Path layout inside the container:
+
+| Path | Purpose |
+|---|---|
+| `/opt/ferry/bin` | Mounted chain binaries |
+| `/var/lib/ferry/chains` | Mounted per-chain homes and keyrings |
+| `/var/lib/ibc-ferry` | SQLite state volume |
+| `/etc/ibc-ferry/config.toml` | Mounted config |
+
+Rootless Podman maps the container user to a subuid unless `userns_mode:
+keep-id` is used. If the keyring is not readable, chown the dedicated chains
+directory:
+
+```bash
+podman unshare chown -R 10001:10001 chains
+```
+
+If `host.containers.internal` is not enough for your Podman network, use
+`network_mode: host` and change the config RPC URLs to `127.0.0.1`.
+
+The image is built and pushed by `.github/workflows/image.yml` on `main` and
+version tags. The workflow uses multi-arch `linux/amd64` and `linux/arm64` and
+GHCR via `GITHUB_TOKEN`.
+
 ## Config
 
 TOML is the primary format. `config.example.toml` shows a multi-chain config;

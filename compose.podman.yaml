@@ -1,0 +1,36 @@
+services:
+  ferry:
+    image: ghcr.io/karsahq/ibc-ferry:${FERRY_IMAGE_TAG:-latest}
+    # For local development, replace the image with: build: .
+    user: "10001:10001"
+    userns_mode: "keep-id:uid=10001,gid=10001"
+    command:
+      - --config
+      - /etc/ibc-ferry/config.toml
+      - start
+      - --http-addr
+      - 0.0.0.0:8080
+    volumes:
+      - ${FERRY_CONFIG:-./config.container.podman.toml}:/etc/ibc-ferry/config.toml:ro,Z
+      - ferry-state:/var/lib/ibc-ferry
+      - ${FERRY_BIN_DIR:-./bin}:/opt/ferry/bin:ro,Z
+      - ${FERRY_CHAINS_DIR:-./chains}:/var/lib/ferry/chains:rw,Z
+    ports:
+      - "127.0.0.1:8080:8080"
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  ferry-state:

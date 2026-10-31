@@ -1,0 +1,29 @@
+# This config is for the generic ibc-ferry image. Chain binaries and keyring
+# homes are mounted from the host; the image does not bundle karsad or gaiad.
+#
+# Podman host access: host.containers.internal
+# Docker host access: host.docker.internal
+
+[chains.karsa]
+binary = "/opt/ferry/bin/karsad"
+home = "/var/lib/ferry/chains/karsa"
+node = "tcp://host.containers.internal:26657"
+rpc = "http://host.containers.internal:26657"
+chain_id = "karsa_262144-1"
+keyring_backend = "file"
+from = "ferry"
+gas_prices = "0akra"
+
+[chains.gaia]
+binary = "/opt/ferry/bin/gaiad"
+home = "/var/lib/ferry/chains/gaia"
+node = "tcp://host.containers.internal:26658"
+rpc = "http://host.containers.internal:26658"
+chain_id = "gaia-test-1"
+keyring_backend = "file"
+from = "ferry"
+gas_prices = "1stake"
+
+[[chains.gaia.fee]]
+denom = "stake"
+amount = "5000000"
