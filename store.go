@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	schemaVersion       = 2
+	schemaVersion       = 3
 	legacyStateVersion  = 1
 	legacyStateFileName = "links.json"
 )
@@ -170,10 +170,15 @@ func (s *LinkStore) migrate() error {
 			"ALTER TABLE packets ADD COLUMN acknowledgement TEXT",
 			"DROP TABLE IF EXISTS scan_state",
 			createScanStateStatement,
+			createPacketTerminalIndexStatement,
 		} {
 			if _, err := s.db.Exec(stmt); err != nil {
 				return fmt.Errorf("migrate state %s: %w", s.Path, err)
 			}
+		}
+	case 2:
+		if _, err := s.db.Exec(createPacketTerminalIndexStatement); err != nil {
+			return fmt.Errorf("migrate state %s: %w", s.Path, err)
 		}
 	default:
 		return fmt.Errorf("state %s has unsupported schema version %d", s.Path, version)
@@ -221,7 +226,10 @@ var schemaStatements = []string{
 	)`,
 	createScanStateStatement,
 	`CREATE INDEX IF NOT EXISTS packets_pending_idx ON packets(status, next_attempt_at)`,
+	createPacketTerminalIndexStatement,
 }
+
+const createPacketTerminalIndexStatement = `CREATE INDEX IF NOT EXISTS packets_terminal_idx ON packets(status, updated_at)`
 
 const createScanStateStatement = `CREATE TABLE IF NOT EXISTS scan_state (
 	link_id TEXT NOT NULL,
@@ -551,6 +559,19 @@ func (s *LinkStore) SetPacketAcknowledgement(linkID, direction string, sequence 
 		linkID, direction, sequence,
 	)
 	return err
+}
+
+// PruneTerminalPackets deletes acked and timed-out packets last updated before
+// the cutoff. Non-terminal packets are never removed.
+func (s *LinkStore) PruneTerminalPackets(before time.Time) (int64, error) {
+	result, err := s.db.Exec(`DELETE FROM packets
+		WHERE status IN (?, ?) AND updated_at < ?`,
+		PacketAcked, PacketTimedOut, before.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 func nullableString(value string) any {

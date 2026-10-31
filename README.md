@@ -87,6 +87,7 @@ ibc-ferry --config config.toml connect <chain-a> <chain-b>
 ibc-ferry --config config.toml pair <chain-a> <client-a> <chain-b> <client-b>
 ibc-ferry --config config.toml doctor [--strict]
 ibc-ferry --config config.toml status [--json]
+ibc-ferry --config config.toml prune [--older-than 168h]
 ibc-ferry --config config.toml relay --link <link-id> --once
 ibc-ferry --config config.toml relay --link <link-id>
 ibc-ferry --config config.toml start [--http-addr 127.0.0.1:8080]
@@ -113,12 +114,14 @@ running for the selected link. `start` runs the loop for every stored link and
 serves status/metrics on `127.0.0.1:8080` by default. Each cycle scans
 `send_packet` and `write_acknowledgement` events, stores new packets in SQLite,
 then decides between recv, ack, and timeout. The defaults are a 5s interval,
-one block of finality, and a 1000-block lookback on first run; use
-`--interval`, `--finality`, and `--lookback` to change them. Failed packets get
-exponential backoff.
+one block of finality, a 1000-block lookback on first run, and 7-day retention
+for terminal packets. Use `--interval`, `--finality`, `--lookback`, and
+`--retention` to change them; `--retention 0` disables pruning. Failed packets
+get exponential backoff.
 
 `status` reads the local SQLite state and prints a table; `--json` emits the
-same data for scripts.
+same data for scripts. `prune` removes old `acked` and `timed_out` packets
+manually; the watcher applies the same retention automatically.
 
 `--state <file>` overrides the SQLite state path. The default is
 `~/.local/state/ibc-ferry/state.db` (or `$XDG_STATE_HOME/ibc-ferry/state.db`),
@@ -161,8 +164,8 @@ does not forget in-flight work.
 
 The metrics include `ferry_links_total`, `ferry_packets`,
 `ferry_pending_packets`, `ferry_scan_height`, `ferry_relay_cycles_total`,
-`ferry_relay_actions_total`, `ferry_relay_last_cycle_timestamp_seconds`, and
-`ferry_relay_last_cycle_error`. Bind to loopback unless you put an
+`ferry_relay_actions_total`, `ferry_pruned_packets_total`,
+`ferry_relay_last_cycle_timestamp_seconds`, and `ferry_relay_last_cycle_error`. Bind to loopback unless you put an
 authenticated proxy in front; there is no built-in authentication.
 
 ## How it works
@@ -205,6 +208,7 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - Watcher ingestion, recv, ack, and timeout in both directions against the
   live Karsa v11 / Gaia v29 pair.
 - Status, metrics, and health handlers through unit tests.
+- Terminal packet retention and manual pruning through unit tests.
 
 Harnesses live in `examples/`. They expect the Karsa checkout at
 `../karsa` by default; override with `KARSA_ROOT=/path/to/karsa`.

@@ -25,6 +25,7 @@ type relayStats struct {
 	lastCycle time.Time
 	lastError string
 	actions   map[string]uint64
+	pruned    uint64
 }
 
 func newRelayStats() *relayStats {
@@ -58,12 +59,22 @@ func (s *relayStats) addAction(action string) {
 	s.actions[action]++
 }
 
+func (s *relayStats) addPruned(count int64) {
+	if s == nil || count <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruned += uint64(count)
+}
+
 type statsSnapshot struct {
 	Started   time.Time
 	Cycles    uint64
 	LastCycle time.Time
 	LastError string
 	Actions   map[string]uint64
+	Pruned    uint64
 }
 
 func (s *relayStats) snapshot() statsSnapshot {
@@ -82,6 +93,7 @@ func (s *relayStats) snapshot() statsSnapshot {
 		LastCycle: s.lastCycle,
 		LastError: s.lastError,
 		Actions:   actions,
+		Pruned:    s.pruned,
 	}
 }
 
@@ -92,6 +104,7 @@ type relayStatus struct {
 	Cycles        uint64            `json:"cycles"`
 	LastError     string            `json:"last_error,omitempty"`
 	Actions       map[string]uint64 `json:"actions"`
+	PrunedPackets uint64            `json:"pruned_packets_total"`
 	Totals        map[string]int    `json:"packet_totals"`
 	Links         []linkStatus      `json:"links"`
 }
@@ -115,13 +128,14 @@ func buildStatus(store *LinkStore, stats *relayStats) (relayStatus, error) {
 	}
 	snapshot := stats.snapshot()
 	status := relayStatus{
-		Time:      time.Now().UTC(),
-		LastCycle: snapshot.LastCycle,
-		Cycles:    snapshot.Cycles,
-		LastError: snapshot.LastError,
-		Actions:   snapshot.Actions,
-		Totals:    make(map[string]int),
-		Links:     make([]linkStatus, 0, len(links)),
+		Time:          time.Now().UTC(),
+		LastCycle:     snapshot.LastCycle,
+		Cycles:        snapshot.Cycles,
+		LastError:     snapshot.LastError,
+		Actions:       snapshot.Actions,
+		PrunedPackets: snapshot.Pruned,
+		Totals:        make(map[string]int),
+		Links:         make([]linkStatus, 0, len(links)),
 	}
 	if !snapshot.Started.IsZero() {
 		status.UptimeSeconds = time.Since(snapshot.Started).Seconds()
@@ -335,6 +349,10 @@ func writeMetrics(w io.Writer, status relayStatus) {
 	} else {
 		fmt.Fprintf(w, "ferry_relay_last_cycle_timestamp_seconds %d\n", status.LastCycle.Unix())
 	}
+
+	fmt.Fprintln(w, "# HELP ferry_pruned_packets_total Terminal packets removed by retention.")
+	fmt.Fprintln(w, "# TYPE ferry_pruned_packets_total counter")
+	fmt.Fprintf(w, "ferry_pruned_packets_total %d\n", status.PrunedPackets)
 
 	fmt.Fprintln(w, "# HELP ferry_relay_last_cycle_error Whether the last cycle failed.")
 	fmt.Fprintln(w, "# TYPE ferry_relay_last_cycle_error gauge")

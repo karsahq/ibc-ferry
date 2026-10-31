@@ -339,3 +339,51 @@ func TestLinkStorePacketRoundTrip(t *testing.T) {
 		t.Fatalf("scan height = %d, %v", height, ok)
 	}
 }
+
+func TestPruneTerminalPackets(t *testing.T) {
+	store, err := openLinkStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	link, err := NewLink("chain-a", "07-tendermint-0", "chain-b", "07-tendermint-0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(link); err != nil {
+		t.Fatal(err)
+	}
+	for sequence, status := range map[int64]string{
+		1: PacketPending,
+		2: PacketAcked,
+		3: PacketTimedOut,
+	} {
+		if _, err := store.InsertPacket(PacketRecord{
+			LinkID: link.ID, Direction: directionAToB, Sequence: sequence,
+			SourceClient: link.ClientA, DestinationClient: link.ClientB,
+			Status: status,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339Nano)
+	if _, err := store.db.Exec(`UPDATE packets SET updated_at = ?`, old); err != nil {
+		t.Fatal(err)
+	}
+
+	count, err := store.PruneTerminalPackets(time.Now().UTC().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("pruned = %d, want 2", count)
+	}
+	packets, err := store.Packets(link.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packets) != 1 || packets[0].Status != PacketPending {
+		t.Fatalf("remaining packets = %+v", packets)
+	}
+}

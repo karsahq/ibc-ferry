@@ -43,6 +43,7 @@ func TestBuildStatusAndMetrics(t *testing.T) {
 
 	stats := newRelayStats()
 	stats.addAction("recv")
+	stats.addPruned(3)
 	stats.recordCycle(nil)
 	status, err := buildStatus(store, stats)
 	if err != nil {
@@ -71,6 +72,7 @@ func TestBuildStatusAndMetrics(t *testing.T) {
 		`ferry_scan_height{link="` + link.ID + `",chain="` + link.ChainA + `"} 10`,
 		`ferry_relay_actions_total{action="recv"} 1`,
 		"ferry_relay_cycles_total 1",
+		"ferry_pruned_packets_total 3",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("metrics missing %q:\n%s", want, output)

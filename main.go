@@ -50,6 +50,8 @@ func main() {
 		err = cmdDoctor(cfg, *statePath, args[1:])
 	case "status":
 		err = cmdStatus(cfg, *statePath, args[1:])
+	case "prune":
+		err = cmdPrune(cfg, *statePath, args[1:])
 	case "relay":
 		err = cmdRelay(cfg, *statePath, args[1:])
 	case "start":
@@ -79,6 +81,7 @@ func usage() {
 	fmt.Fprintln(out, "                               verify and persist an existing client pair")
 	fmt.Fprintln(out, "  doctor [--strict]            check links, clients, balances and packet state")
 	fmt.Fprintln(out, "  status [--json]              show local relay state")
+	fmt.Fprintln(out, "  prune [--older-than 168h]    delete old terminal packets")
 	fmt.Fprintln(out, "  relay [--link <id>] [--once] scan and relay packets")
 	fmt.Fprintln(out, "  start                        run the relay loop and status server")
 	fmt.Fprintln(out)

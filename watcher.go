@@ -21,12 +21,13 @@ const (
 )
 
 type relayOptions struct {
-	LinkID   string
-	Once     bool
-	Interval time.Duration
-	Finality int64
-	Lookback int64
-	HTTPAddr string
+	LinkID    string
+	Once      bool
+	Interval  time.Duration
+	Finality  int64
+	Lookback  int64
+	HTTPAddr  string
+	Retention time.Duration
 }
 
 type relayAction int
@@ -54,6 +55,7 @@ func cmdRelay(cfg Config, statePath string, args []string) error {
 	linkID := fs.String("link", "", "only relay this link ID")
 	once := fs.Bool("once", false, "run one cycle and exit")
 	httpAddr := fs.String("http-addr", "", "optional status/metrics listen address")
+	retention := fs.Duration("retention", 0, "prune terminal packets older than this; 0 disables")
 	interval := fs.Duration("interval", 5*time.Second, "delay between cycles")
 	finality := fs.Int64("finality", 1, "blocks to wait before scanning")
 	lookback := fs.Int64("lookback", 1000, "blocks to scan on first run")
@@ -64,12 +66,13 @@ func cmdRelay(cfg Config, statePath string, args []string) error {
 		return fmt.Errorf("relay takes no positional arguments")
 	}
 	return runRelay(cfg, statePath, relayOptions{
-		LinkID:   *linkID,
-		Once:     *once,
-		Interval: *interval,
-		Finality: *finality,
-		Lookback: *lookback,
-		HTTPAddr: *httpAddr,
+		LinkID:    *linkID,
+		Once:      *once,
+		Interval:  *interval,
+		Finality:  *finality,
+		Lookback:  *lookback,
+		HTTPAddr:  *httpAddr,
+		Retention: *retention,
 	})
 }
 
@@ -80,6 +83,7 @@ func cmdStart(cfg Config, statePath string, args []string) error {
 	finality := fs.Int64("finality", 1, "blocks to wait before scanning")
 	lookback := fs.Int64("lookback", 1000, "blocks to scan on first run")
 	httpAddr := fs.String("http-addr", "127.0.0.1:8080", "status/metrics listen address")
+	retention := fs.Duration("retention", 7*24*time.Hour, "prune terminal packets older than this; 0 disables")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -87,10 +91,11 @@ func cmdStart(cfg Config, statePath string, args []string) error {
 		return fmt.Errorf("start takes no positional arguments")
 	}
 	return runRelay(cfg, statePath, relayOptions{
-		Interval: *interval,
-		Finality: *finality,
-		Lookback: *lookback,
-		HTTPAddr: *httpAddr,
+		Interval:  *interval,
+		Finality:  *finality,
+		Lookback:  *lookback,
+		HTTPAddr:  *httpAddr,
+		Retention: *retention,
 	})
 }
 
@@ -124,6 +129,9 @@ func runRelay(cfg Config, statePath string, opts relayOptions) error {
 	for {
 		err := relayCycle(store, cfg, opts, stats)
 		stats.recordCycle(err)
+		if pruneErr := pruneTerminal(store, stats, opts.Retention); pruneErr != nil {
+			log.Printf("relay: prune: %v", pruneErr)
+		}
 		if err != nil {
 			if opts.Once {
 				return err
