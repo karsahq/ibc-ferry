@@ -49,6 +49,7 @@ func cmdLinks(cfg Config, statePath string, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer store.Close()
 	links, err := store.List()
 	if err != nil {
 		return err
@@ -87,6 +88,7 @@ func cmdLink(statePath string, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer store.Close()
 	link, err := store.Get(fs.Arg(0))
 	if err != nil {
 		return err

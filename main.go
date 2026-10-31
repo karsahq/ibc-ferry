@@ -9,7 +9,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "", "path to the TOML or JSON config file (default ~/.config/ibc-ferry/config.toml)")
-	statePath := flag.String("state", "", "path to the link state file (default ~/.ibc-ferry/links.json)")
+	statePath := flag.String("state", "", "path to the SQLite state file (default ~/.local/state/ibc-ferry/state.db)")
 	flag.Usage = usage
 	flag.Parse()
 

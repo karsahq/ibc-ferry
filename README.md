@@ -29,16 +29,16 @@ an `MsgUpdateClient` transaction.
 The newer CLI also keeps a local inventory of links. An IBC v2 link is just a
 bidirectional pair of clients; v2 has no connections or channels.
 
-Chain definitions belong in a config file. The link inventory is dynamic state
-and will move to SQLite next; keeping the two separate lets operators
-version-control config without treating the database as configuration.
+Chain definitions belong in a config file. Runtime state belongs in SQLite;
+keeping the two separate lets operators version-control config without treating
+the database as configuration.
 
 ## Requirements
 
 - Go 1.24+
 - The chain binary for each side (`karsad`, `gaiad`, ...).
 - A funded relayer key on both chains, in a keyring the binary can read.
-- A JSON config file.
+- A TOML or JSON config file.
 
 ## Build
 
@@ -85,8 +85,9 @@ ibc-ferry --config config.toml link <link-id>
 
 With the default config path in place, `--config` can be omitted.
 
-`--state <file>` overrides the local link state path. The default is
-`~/.ibc-ferry/links.json`, or `IBC_FERRY_STATE` when set.
+`--state <file>` overrides the SQLite state path. The default is
+`~/.local/state/ibc-ferry/state.db` (or `$XDG_STATE_HOME/ibc-ferry/state.db`),
+or `IBC_FERRY_STATE` when set.
 
 Running without a command keeps the legacy one-shot behavior:
 
@@ -96,28 +97,22 @@ ibc-ferry --config config.example.json
 
 ## Local state
 
-Links are stored as a versioned JSON document:
+Runtime state lives in SQLite with WAL mode and `synchronous=FULL`. The initial
+schema contains:
 
-```json
-{
-  "version": 1,
-  "links": [
-    {
-      "id": "gaia-test-1:07-tendermint-0<->karsa_262144-1:07-tendermint-0",
-      "chain_a": "gaia-test-1",
-      "client_a": "07-tendermint-0",
-      "chain_b": "karsa_262144-1",
-      "client_b": "07-tendermint-0",
-      "status": "active",
-      "created_at": "2026-10-31T15:00:00Z"
-    }
-  ]
-}
-```
+| Table | Purpose |
+|---|---|
+| `links` | Client pairs and their status |
+| `packets` | Packet work queue, tx hashes, proof heights and retry state |
+| `scan_state` | Last scanned height per link |
 
-Writes are atomic: the state is written to a temporary file, synced, and
-renamed. The storage layer is deliberately separate from the model so a
-SQLite backend can replace it later without changing the CLI.
+Schema migrations run automatically on open. A `links.json` file from the
+earlier prototype is imported on first open of the default state path; existing
+rows are not overwritten.
+
+The chain remains the source of truth. If the database is lost, packets can be
+rebuilt by rescanning from a known height. The database exists so a restart
+does not forget in-flight work.
 
 ## How it works
 

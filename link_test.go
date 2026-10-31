@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -57,10 +58,12 @@ func TestLinkValidateRejectsBadState(t *testing.T) {
 }
 
 func TestLinkStoreRoundTrip(t *testing.T) {
-	store, err := openLinkStore(filepath.Join(t.TempDir(), "state", "links.json"))
+	store, err := openLinkStore(filepath.Join(t.TempDir(), "state", "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer store.Close()
+
 	links, err := store.List()
 	if err != nil {
 		t.Fatal(err)
@@ -117,39 +120,87 @@ func TestLinkStoreRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLinkStoreRejectsDuplicates(t *testing.T) {
+func TestLinkStoreCreatesPacketSchema(t *testing.T) {
+	store, err := openLinkStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	for _, table := range []string{"links", "packets", "scan_state"} {
+		var name string
+		err := store.db.QueryRow(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table,
+		).Scan(&name)
+		if err != nil {
+			t.Fatalf("table %s: %v", table, err)
+		}
+	}
+	var version int
+	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, schemaVersion)
+	}
+}
+
+func TestLinkStoreRejectsUnknownSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 99"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := openLinkStore(path); err == nil {
+		t.Fatal("expected unsupported schema error")
+	}
+}
+
+func TestLinkStoreImportsLegacyJSON(t *testing.T) {
+	home := t.TempDir()
+	stateDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	t.Setenv("IBC_FERRY_STATE", "")
+
 	link, err := NewLink("chain-a", "07-tendermint-0", "chain-b", "07-tendermint-0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "links.json")
-	data, err := json.Marshal(stateFile{Version: stateVersion, Links: []Link{link, link}})
+	legacyPath := filepath.Join(home, ".ibc-ferry", "links.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(legacyStateFile{Version: legacyStateVersion, Links: []Link{link}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := os.WriteFile(legacyPath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	store, err := openLinkStore(path)
+	store, err := openLinkStore("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.List(); err == nil {
-		t.Fatal("expected duplicate link error")
-	}
-}
+	defer store.Close()
 
-func TestLinkStoreRejectsUnknownVersion(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "links.json")
-	if err := os.WriteFile(path, []byte(`{"version":99,"links":[]}`), 0o600); err != nil {
-		t.Fatal(err)
+	wantPath := filepath.Join(stateDir, "ibc-ferry", "state.db")
+	if store.Path != wantPath {
+		t.Fatalf("path = %q, want %q", store.Path, wantPath)
 	}
-	store, err := openLinkStore(path)
+	got, err := store.Get(link.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.List(); err == nil {
-		t.Fatal("expected version error")
+	if got.ID != link.ID {
+		t.Fatalf("id = %q, want %q", got.ID, link.ID)
 	}
 }
