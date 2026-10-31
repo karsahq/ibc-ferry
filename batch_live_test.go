@@ -67,7 +67,7 @@ func TestLiveWatcherBatchPackets(t *testing.T) {
 
 	opts := relayOptions{
 		LinkID: link.ID, Once: true, Interval: time.Second,
-		Finality: 0, Lookback: 1000, BatchSize: count,
+		Finality: 1, Lookback: 1000, BatchSize: count,
 	}
 	for cycle := 0; cycle < 6; cycle++ {
 		if err := runRelay(cfg, statePath, opts); err != nil {
@@ -92,7 +92,10 @@ func TestLiveWatcherBatchPackets(t *testing.T) {
 		if acked == count {
 			return
 		}
-		if len(statuses) != count {
+		if len(statuses) > count {
+			t.Fatalf("ingested %d packets, want %d", len(statuses), count)
+		}
+		if cycle == 5 {
 			t.Fatalf("ingested %d packets, want %d", len(statuses), count)
 		}
 		time.Sleep(2 * time.Second)

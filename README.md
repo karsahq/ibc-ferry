@@ -183,9 +183,11 @@ and `--batch-size` to change them; `--retention 0` disables pruning,
 disables batching. Failed packets get exponential backoff.
 
 Relay actions are grouped by destination chain, client, action, and proof
-height. One client update and one transaction are used per group. If a batch
-fails, the watcher retries its messages individually so one bad packet does
-not block the rest.
+height. One client update and one transaction are used per group. With
+`--finality >= 1`, recv proofs use one common source height per cycle, so a
+burst of packets can be received in one transaction. `--finality 0` falls back
+to per-packet proofs. If a batch fails, the watcher retries its messages
+individually so one bad packet does not block the rest.
 
 Client refresh matters for links with no traffic: an IBC client expires if it
 is never updated during its trusting period. The watcher refreshes both clients
@@ -260,8 +262,8 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 
 - **No automatic repair for orphans.** `doctor` reports orphaned or unlinked
   clients, but `pair` still needs explicit client IDs to repair them.
-- **Batching is per proof height.** Packets whose proofs land at different
-  heights use separate transactions.
+- **Batching is per proof height.** With `--finality 0`, or when a proof at
+  the common height is unavailable, packets may use separate transactions.
 - **Status API has no authentication.** Keep it on loopback or place it behind
   an authenticated proxy.
 - **Client updates are driven by recv, ack, and timeout.** The legacy one-shot
@@ -281,7 +283,8 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - Watcher ingestion, recv, ack, and timeout in both directions against the
   live Karsa v11 / Gaia v29 pair.
 - Idle client refresh against the same live pair.
-- A three-packet burst acknowledged in one batch transaction.
+- A three-packet burst received in one transaction and acknowledged in one
+  transaction.
 - Status, metrics, and health handlers through unit tests.
 - Terminal packet retention and manual pruning through unit tests.
 

@@ -252,6 +252,22 @@ func getProof(src ChainConfig, srcClient string, sequence int64) (proof, error) 
 	if err != nil {
 		return proof{}, err
 	}
+	return parseCommitmentProof(res)
+}
+
+func getProofAtHeight(src ChainConfig, srcClient string, sequence, height int64) (proof, error) {
+	res, err := queryJSON(
+		src, "ibc", "channelv2", "packet-commitment",
+		srcClient, strconv.FormatInt(sequence, 10), "--prove",
+		"--height", strconv.FormatInt(height, 10),
+	)
+	if err != nil {
+		return proof{}, err
+	}
+	return parseCommitmentProof(res)
+}
+
+func parseCommitmentProof(res map[string]any) (proof, error) {
 	commitment, _ := res["proof"].(string)
 	proofHeight, _ := res["proof_height"].(map[string]any)
 	if commitment == "" || proofHeight == nil {

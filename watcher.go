@@ -389,6 +389,7 @@ func processLinkPackets(store *LinkStore, cfg Config, link Link, stats *relaySta
 		return err
 	}
 	now := time.Now().UTC()
+	proofHeights := make(map[string]int64)
 	var updated []PacketRecord
 	var actionable []preparedPacket
 
@@ -399,7 +400,7 @@ func processLinkPackets(store *LinkStore, cfg Config, link Link, stats *relaySta
 		if !packet.NextAttemptAt.IsZero() && packet.NextAttemptAt.After(now) {
 			continue
 		}
-		prepared, err := preparePacket(cfg, link, packet)
+		prepared, err := preparePacket(cfg, link, packet, opts.Finality, proofHeights)
 		if err != nil {
 			packet.Attempts++
 			packet.LastError = err.Error()
@@ -443,7 +444,7 @@ func processLinkPackets(store *LinkStore, cfg Config, link Link, stats *relaySta
 	return nil
 }
 
-func preparePacket(cfg Config, link Link, packet PacketRecord) (preparedPacket, error) {
+func preparePacket(cfg Config, link Link, packet PacketRecord, finality int64, proofHeights map[string]int64) (preparedPacket, error) {
 	src, dst, srcClient, dstClient, err := packetEndpoints(cfg, link, packet.Direction)
 	if err != nil {
 		return preparedPacket{}, err
@@ -536,7 +537,7 @@ func preparePacket(cfg Config, link Link, packet PacketRecord) (preparedPacket, 
 		return preparedPacket{}, err
 	}
 
-	commitmentProof, err := getProof(src.Config, srcClient, packet.Sequence)
+	commitmentProof, err := getRecvProof(src.Config, srcClient, packet.Sequence, finality, proofHeights)
 	if err != nil {
 		return preparedPacket{}, err
 	}
@@ -553,6 +554,27 @@ func preparePacket(cfg Config, link Link, packet PacketRecord) (preparedPacket, 
 		BroadcastChain: dst, ClientID: dstClient, Counterparty: src,
 		ProofHeight: commitmentProof.HeightNum,
 	}, nil
+}
+
+func getRecvProof(src ChainConfig, srcClient string, sequence, finality int64, proofHeights map[string]int64) (proof, error) {
+	if finality < 1 {
+		return getProof(src, srcClient, sequence)
+	}
+	height, ok := proofHeights[src.ChainID]
+	if !ok {
+		var err error
+		height, err = latestHeight(src)
+		if err != nil {
+			return proof{}, err
+		}
+		proofHeights[src.ChainID] = height
+	}
+	commitmentProof, err := getProofAtHeight(src, srcClient, sequence, height)
+	if err == nil {
+		return commitmentProof, nil
+	}
+	// Fall back to a per-packet proof if the common height is not usable.
+	return getProof(src, srcClient, sequence)
 }
 
 func groupPrepared(prepared []preparedPacket, batchSize int) [][]preparedPacket {
