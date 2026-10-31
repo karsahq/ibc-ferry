@@ -175,10 +175,15 @@ running for the selected link. `start` runs the loop for every stored link and
 serves status/metrics on `127.0.0.1:8080` by default. Each cycle scans
 `send_packet` and `write_acknowledgement` events, stores new packets in SQLite,
 then decides between recv, ack, and timeout. The defaults are a 5s interval,
-one block of finality, a 1000-block lookback on first run, and 7-day retention
-for terminal packets. Use `--interval`, `--finality`, `--lookback`, and
-`--retention` to change them; `--retention 0` disables pruning. Failed packets
-get exponential backoff.
+one block of finality, a 1000-block lookback on first run, 7-day retention
+for terminal packets, and a 1-hour client refresh. Use `--interval`,
+`--finality`, `--lookback`, `--retention`, and `--client-refresh` to change
+them; `--retention 0` disables pruning and `--client-refresh 0` disables idle
+client updates. Failed packets get exponential backoff.
+
+Client refresh matters for links with no traffic: an IBC client expires if it
+is never updated during its trusting period. The watcher refreshes both clients
+periodically, not only when a packet needs relaying.
 
 `status` reads the local SQLite state and prints a table; `--json` emits the
 same data for scripts. `prune` removes old `acked` and `timed_out` packets
@@ -268,6 +273,7 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
   `MsgTimeout` relay in both directions.
 - Watcher ingestion, recv, ack, and timeout in both directions against the
   live Karsa v11 / Gaia v29 pair.
+- Idle client refresh against the same live pair.
 - Status, metrics, and health handlers through unit tests.
 - Terminal packet retention and manual pruning through unit tests.
 

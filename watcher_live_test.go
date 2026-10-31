@@ -174,3 +174,71 @@ func TestLiveWatcherTimeout(t *testing.T) {
 	}
 	t.Fatalf("packet %d was not ingested", sent.Sequence)
 }
+
+func TestLiveWatcherClientRefresh(t *testing.T) {
+	configPath := os.Getenv("FERRY_LIVE_CONFIG")
+	statePath := os.Getenv("FERRY_LIVE_STATE")
+	if configPath == "" || statePath == "" {
+		t.Skip("set FERRY_LIVE_CONFIG and FERRY_LIVE_STATE")
+	}
+
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := openLinkStore(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	links, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(links) != 1 {
+		t.Fatalf("expected exactly one link, got %d", len(links))
+	}
+	link := links[0]
+	chainA, err := cfg.chainByID(link.ChainA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chainB, err := cfg.chainByID(link.ChainB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, beforeA, err := clientLatestHeight(chainA.Config, link.ClientA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, beforeB, err := clientLatestHeight(chainB.Config, link.ClientB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(3 * time.Second)
+
+	if err := runRelay(cfg, statePath, relayOptions{
+		LinkID:        link.ID,
+		Once:          true,
+		Interval:      time.Second,
+		Finality:      0,
+		Lookback:      1000,
+		ClientRefresh: time.Nanosecond,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, afterA, err := clientLatestHeight(chainA.Config, link.ClientA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, afterB, err := clientLatestHeight(chainB.Config, link.ClientB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("client heights: A %d -> %d, B %d -> %d", beforeA, afterA, beforeB, afterB)
+	if afterA <= beforeA || afterB <= beforeB {
+		t.Fatalf("clients were not refreshed: A %d -> %d, B %d -> %d", beforeA, afterA, beforeB, afterB)
+	}
+}

@@ -21,13 +21,14 @@ const (
 )
 
 type relayOptions struct {
-	LinkID    string
-	Once      bool
-	Interval  time.Duration
-	Finality  int64
-	Lookback  int64
-	HTTPAddr  string
-	Retention time.Duration
+	LinkID        string
+	Once          bool
+	Interval      time.Duration
+	Finality      int64
+	Lookback      int64
+	HTTPAddr      string
+	Retention     time.Duration
+	ClientRefresh time.Duration
 }
 
 type relayAction int
@@ -56,6 +57,7 @@ func cmdRelay(cfg Config, statePath string, args []string) error {
 	once := fs.Bool("once", false, "run one cycle and exit")
 	httpAddr := fs.String("http-addr", "", "optional status/metrics listen address")
 	retention := fs.Duration("retention", 0, "prune terminal packets older than this; 0 disables")
+	clientRefresh := fs.Duration("client-refresh", 0, "refresh idle clients at this interval; 0 disables")
 	interval := fs.Duration("interval", 5*time.Second, "delay between cycles")
 	finality := fs.Int64("finality", 1, "blocks to wait before scanning")
 	lookback := fs.Int64("lookback", 1000, "blocks to scan on first run")
@@ -66,13 +68,14 @@ func cmdRelay(cfg Config, statePath string, args []string) error {
 		return fmt.Errorf("relay takes no positional arguments")
 	}
 	return runRelay(cfg, statePath, relayOptions{
-		LinkID:    *linkID,
-		Once:      *once,
-		Interval:  *interval,
-		Finality:  *finality,
-		Lookback:  *lookback,
-		HTTPAddr:  *httpAddr,
-		Retention: *retention,
+		LinkID:        *linkID,
+		Once:          *once,
+		Interval:      *interval,
+		Finality:      *finality,
+		Lookback:      *lookback,
+		HTTPAddr:      *httpAddr,
+		Retention:     *retention,
+		ClientRefresh: *clientRefresh,
 	})
 }
 
@@ -84,6 +87,7 @@ func cmdStart(cfg Config, statePath string, args []string) error {
 	lookback := fs.Int64("lookback", 1000, "blocks to scan on first run")
 	httpAddr := fs.String("http-addr", "127.0.0.1:8080", "status/metrics listen address")
 	retention := fs.Duration("retention", 7*24*time.Hour, "prune terminal packets older than this; 0 disables")
+	clientRefresh := fs.Duration("client-refresh", time.Hour, "refresh idle clients at this interval; 0 disables")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -91,11 +95,12 @@ func cmdStart(cfg Config, statePath string, args []string) error {
 		return fmt.Errorf("start takes no positional arguments")
 	}
 	return runRelay(cfg, statePath, relayOptions{
-		Interval:  *interval,
-		Finality:  *finality,
-		Lookback:  *lookback,
-		HTTPAddr:  *httpAddr,
-		Retention: *retention,
+		Interval:      *interval,
+		Finality:      *finality,
+		Lookback:      *lookback,
+		HTTPAddr:      *httpAddr,
+		Retention:     *retention,
+		ClientRefresh: *clientRefresh,
 	})
 }
 
@@ -120,6 +125,7 @@ func runRelay(cfg Config, statePath string, opts relayOptions) error {
 	defer stop()
 
 	stats := newRelayStats()
+	refreshed := make(map[string]time.Time)
 	if opts.HTTPAddr != "" {
 		if err := serveStatus(ctx, opts.HTTPAddr, store, stats, opts.Interval); err != nil {
 			return err
@@ -127,7 +133,7 @@ func runRelay(cfg Config, statePath string, opts relayOptions) error {
 	}
 
 	for {
-		err := relayCycle(store, cfg, opts, stats)
+		err := relayCycle(store, cfg, opts, stats, refreshed)
 		stats.recordCycle(err)
 		if pruneErr := pruneTerminal(store, stats, opts.Retention); pruneErr != nil {
 			log.Printf("relay: prune: %v", pruneErr)
@@ -149,7 +155,7 @@ func runRelay(cfg Config, statePath string, opts relayOptions) error {
 	}
 }
 
-func relayCycle(store *LinkStore, cfg Config, opts relayOptions, stats *relayStats) error {
+func relayCycle(store *LinkStore, cfg Config, opts relayOptions, stats *relayStats, refreshed map[string]time.Time) error {
 	links, err := selectedLinks(store, opts.LinkID)
 	if err != nil {
 		return err
@@ -161,7 +167,7 @@ func relayCycle(store *LinkStore, cfg Config, opts relayOptions, stats *relaySta
 
 	var errs []error
 	for _, link := range links {
-		if err := processLink(store, cfg, link, opts, stats); err != nil {
+		if err := processLink(store, cfg, link, opts, stats, refreshed); err != nil {
 			log.Printf("relay: link %s: %v", link.ID, err)
 			errs = append(errs, fmt.Errorf("link %s: %w", link.ID, err))
 		}
@@ -180,7 +186,7 @@ func selectedLinks(store *LinkStore, linkID string) ([]Link, error) {
 	return []Link{link}, nil
 }
 
-func processLink(store *LinkStore, cfg Config, link Link, opts relayOptions, stats *relayStats) error {
+func processLink(store *LinkStore, cfg Config, link Link, opts relayOptions, stats *relayStats, refreshed map[string]time.Time) error {
 	chainA, err := cfg.chainByID(link.ChainA)
 	if err != nil {
 		return err
@@ -198,6 +204,9 @@ func processLink(store *LinkStore, cfg Config, link Link, opts relayOptions, sta
 		errs = append(errs, fmt.Errorf("scan %s: %w", chainB.Config.ChainID, err))
 	}
 	if err := processLinkPackets(store, cfg, link, stats); err != nil {
+		errs = append(errs, err)
+	}
+	if err := refreshLinkClients(chainA, chainB, link, opts, stats, refreshed); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
@@ -538,6 +547,56 @@ func oppositeDirection(direction string) string {
 		return directionBToA
 	}
 	return directionAToB
+}
+
+func refreshLinkClients(chainA, chainB namedChain, link Link, opts relayOptions, stats *relayStats, refreshed map[string]time.Time) error {
+	if opts.ClientRefresh <= 0 {
+		return nil
+	}
+	if last, ok := refreshed[link.ID]; ok && time.Since(last) < opts.ClientRefresh {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	var errs []error
+	updated := false
+	if didUpdate, err := refreshClient(chainA, chainB, link.ClientA); err != nil {
+		errs = append(errs, fmt.Errorf("refresh %s on %s: %w", link.ClientA, link.ChainA, err))
+	} else if didUpdate {
+		updated = true
+		stats.addAction("client_update")
+	}
+	if didUpdate, err := refreshClient(chainB, chainA, link.ClientB); err != nil {
+		errs = append(errs, fmt.Errorf("refresh %s on %s: %w", link.ClientB, link.ChainB, err))
+	} else if didUpdate {
+		updated = true
+		stats.addAction("client_update")
+	}
+	if len(errs) == 0 {
+		refreshed[link.ID] = now
+	}
+	if updated {
+		log.Printf("relay: %s: refreshed clients", link.ID)
+	}
+	return errors.Join(errs...)
+}
+
+func refreshClient(chain, counterparty namedChain, clientID string) (bool, error) {
+	latest, err := latestHeight(counterparty.Config)
+	if err != nil {
+		return false, err
+	}
+	_, trusted, err := clientLatestHeight(chain.Config, clientID)
+	if err != nil {
+		return false, err
+	}
+	if latest <= trusted {
+		return false, nil
+	}
+	if err := updateClient(chain.Config, counterparty.Config, clientID, latest); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func packetEndpoints(cfg Config, link Link, direction string) (namedChain, namedChain, string, string, error) {
