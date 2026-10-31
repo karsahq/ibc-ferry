@@ -18,6 +18,8 @@ sends one ICS20 v2 packet, and relays `MsgRecvPacket`.
 5. Creates the destination client at that exact proof height.
 6. Adds the counterparty on the destination.
 7. Submits `MsgRecvPacket` to the destination.
+8. Queries the acknowledgement proof, updates the source client to that
+   proof height, and submits `MsgAcknowledgement`.
 
 Creating the destination client *after* the send, at the proof height, avoids
 an `MsgUpdateClient` transaction. That is the trick that keeps this tool
@@ -52,6 +54,7 @@ Copy `config.example.json` and fill in:
 | `gas_prices` | Used by CLI transactions such as `add-counterparty` |
 | `fee` | Optional fixed fee for JSON transactions (some chains reject zero fee) |
 | `src_client` / `dst_client` | Client IDs. Use fresh IDs per run. |
+| `ack` | Optional; defaults to `true`. Set `false` for receive-only runs. |
 | `denom` / `amount` / `receiver` | ICS20 transfer fields |
 
 ## How it works
@@ -70,10 +73,10 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 
 ## Limitations
 
-- **Receive only.** Acks and timeouts are not relayed, so the source packet
-  stays unacknowledged and escrowed funds are not released.
-- **No client updates.** A new destination client is created per run. Use a new
-  client ID for the next run.
+- **No timeout relay yet.** The v2 receipt query used by this CLI path does not
+  return the non-membership proof required by `MsgTimeout`. Acks are supported.
+- **Client updates are only for acknowledgements.** A fresh destination client
+  is still created per run; use a new client ID for the next run.
 - **No retries or persistence.** If a step fails, rerun with fresh client IDs.
 - **No batching.** One packet per invocation.
 - **Experimental.** Not production relayer software.
@@ -82,6 +85,7 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 
 - Karsa <-> Karsa (two local nodes).
 - Karsa -> Gaia v29 and Gaia v29 -> Karsa, native ICS20 v2 transfer.
+- Receive, client update, and acknowledgement relay in both directions.
 
 Harnesses live in `examples/`. They expect the Karsa checkout at
 `../karsa` by default; override with `KARSA_ROOT=/path/to/karsa`.

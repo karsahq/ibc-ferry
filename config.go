@@ -32,6 +32,11 @@ type Config struct {
 	Denom     string      `json:"denom"`
 	Amount    string      `json:"amount"`
 	Receiver  string      `json:"receiver"`
+	Ack       *bool       `json:"ack,omitempty"`
+}
+
+func (c Config) relayAck() bool {
+	return c.Ack == nil || *c.Ack
 }
 
 func loadConfig(path string) (Config, error) {
