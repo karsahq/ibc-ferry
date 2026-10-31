@@ -107,3 +107,74 @@ func TestLoadConfigRejectsHalfLegacyPair(t *testing.T) {
 		t.Fatal("expected missing dst error")
 	}
 }
+
+func TestLoadConfigTOML(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	data := `
+[chains.karsa]
+binary = "karsad"
+home = "/tmp/karsa"
+node = "127.0.0.1:26657"
+rpc = "127.0.0.1:26657"
+chain_id = "karsa_262144-1"
+from = "relayer"
+
+[chains.gaia]
+binary = "gaiad"
+home = "/tmp/gaia"
+node = "127.0.0.1:26658"
+rpc = "127.0.0.1:26658"
+chain_id = "gaia-test-1"
+from = "relayer"
+gas_prices = "1stake"
+
+[[chains.gaia.fee]]
+denom = "stake"
+amount = "5000000"
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gaia, err := cfg.chainByRef("gaia")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gaia.Config.ChainID != "gaia-test-1" {
+		t.Fatalf("chain id = %q", gaia.Config.ChainID)
+	}
+	if len(gaia.Config.Fee) != 1 || gaia.Config.Fee[0].Amount != "5000000" {
+		t.Fatalf("fee = %+v", gaia.Config.Fee)
+	}
+	if gaia.Config.KeyringBackend != "test" {
+		t.Fatalf("keyring default = %q", gaia.Config.KeyringBackend)
+	}
+}
+
+func TestDecodeConfigSniffsTOML(t *testing.T) {
+	var cfg Config
+	data := []byte("[chains.karsa]\nbinary = \"karsad\"\nhome = \"/tmp/karsa\"\nnode = \"127.0.0.1:26657\"\nrpc = \"127.0.0.1:26657\"\nchain_id = \"karsa_262144-1\"\nfrom = \"relayer\"\n")
+	if err := decodeConfig("config.conf", data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDefaultConfigPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("IBC_FERRY_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path, err := defaultConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "ibc-ferry", "config.toml")
+	if path != want {
+		t.Fatalf("path = %q, want %q", path, want)
+	}
+}

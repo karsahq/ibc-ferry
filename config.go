@@ -1,44 +1,48 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/BurntSushi/toml"
 )
 
 type FeeCoin struct {
-	Denom  string `json:"denom"`
-	Amount string `json:"amount"`
+	Denom  string `json:"denom" toml:"denom"`
+	Amount string `json:"amount" toml:"amount"`
 }
 
 type ChainConfig struct {
-	Binary         string    `json:"binary"`
-	Home           string    `json:"home"`
-	Node           string    `json:"node"`
-	RPC            string    `json:"rpc"`
-	ChainID        string    `json:"chain_id"`
-	KeyringBackend string    `json:"keyring_backend"`
-	From           string    `json:"from"`
-	GasPrices      string    `json:"gas_prices"`
-	Fee            []FeeCoin `json:"fee,omitempty"`
+	Binary         string    `json:"binary" toml:"binary"`
+	Home           string    `json:"home" toml:"home"`
+	Node           string    `json:"node" toml:"node"`
+	RPC            string    `json:"rpc" toml:"rpc"`
+	ChainID        string    `json:"chain_id" toml:"chain_id"`
+	KeyringBackend string    `json:"keyring_backend" toml:"keyring_backend"`
+	From           string    `json:"from" toml:"from"`
+	GasPrices      string    `json:"gas_prices" toml:"gas_prices"`
+	Fee            []FeeCoin `json:"fee,omitempty" toml:"fee"`
 }
 
 type Config struct {
 	// Chains holds named chain entries for the multi-chain CLI commands.
-	Chains map[string]ChainConfig `json:"chains,omitempty"`
+	Chains map[string]ChainConfig `json:"chains,omitempty" toml:"chains"`
 
 	// Src and Dst are the legacy single-transfer configuration. They remain
 	// supported so existing one-shot configs keep working.
-	Src       ChainConfig `json:"src,omitempty"`
-	Dst       ChainConfig `json:"dst,omitempty"`
-	SrcClient string      `json:"src_client,omitempty"`
-	DstClient string      `json:"dst_client,omitempty"`
-	Denom     string      `json:"denom,omitempty"`
-	Amount    string      `json:"amount,omitempty"`
-	Receiver  string      `json:"receiver,omitempty"`
-	Ack       *bool       `json:"ack,omitempty"`
+	Src       ChainConfig `json:"src,omitempty" toml:"src"`
+	Dst       ChainConfig `json:"dst,omitempty" toml:"dst"`
+	SrcClient string      `json:"src_client,omitempty" toml:"src_client"`
+	DstClient string      `json:"dst_client,omitempty" toml:"dst_client"`
+	Denom     string      `json:"denom,omitempty" toml:"denom"`
+	Amount    string      `json:"amount,omitempty" toml:"amount"`
+	Receiver  string      `json:"receiver,omitempty" toml:"receiver"`
+	Ack       *bool       `json:"ack,omitempty" toml:"ack"`
 }
 
 type namedChain struct {
@@ -56,10 +60,41 @@ func loadConfig(path string) (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return cfg, err
+	if err := decodeConfig(path, data, &cfg); err != nil {
+		return cfg, fmt.Errorf("decode %s: %w", path, err)
 	}
+	return validateConfig(cfg)
+}
 
+func decodeConfig(path string, data []byte, cfg *Config) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return fmt.Errorf("config file is empty")
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".toml":
+		return toml.Unmarshal(data, cfg)
+	case ".json":
+		return json.Unmarshal(data, cfg)
+	}
+	if trimmed[0] == '{' {
+		return json.Unmarshal(data, cfg)
+	}
+	return toml.Unmarshal(data, cfg)
+}
+
+func defaultConfigPath() (string, error) {
+	if path := os.Getenv("IBC_FERRY_CONFIG"); path != "" {
+		return path, nil
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve config directory: %w", err)
+	}
+	return filepath.Join(dir, "ibc-ferry", "config.toml"), nil
+}
+
+func validateConfig(cfg Config) (Config, error) {
 	if len(cfg.Chains) == 0 && cfg.Src.Binary == "" && cfg.Dst.Binary == "" {
 		return cfg, fmt.Errorf("no chains configured: add a \"chains\" map or legacy src/dst entries")
 	}

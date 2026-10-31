@@ -8,18 +8,21 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "", "path to the JSON config file")
+	configPath := flag.String("config", "", "path to the TOML or JSON config file (default ~/.config/ibc-ferry/config.toml)")
 	statePath := flag.String("state", "", "path to the link state file (default ~/.ibc-ferry/links.json)")
 	flag.Usage = usage
 	flag.Parse()
 
-	if *configPath == "" {
-		fmt.Fprintln(os.Stderr, "ibc-ferry: --config is required")
-		flag.Usage()
-		os.Exit(2)
+	path := *configPath
+	if path == "" {
+		var err error
+		path, err = defaultConfigPath()
+		if err != nil {
+			log.Fatalf("config: %v", err)
+		}
 	}
 
-	cfg, err := loadConfig(*configPath)
+	cfg, err := loadConfig(path)
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
@@ -52,8 +55,8 @@ func main() {
 func usage() {
 	out := os.Stderr
 	fmt.Fprintln(out, "Usage:")
-	fmt.Fprintln(out, "  ibc-ferry --config <file> [--state <file>] <command> [arguments]")
-	fmt.Fprintln(out, "  ibc-ferry --config <file>              # run one legacy transfer")
+	fmt.Fprintln(out, "  ibc-ferry [--config <file>] [--state <file>] <command> [arguments]")
+	fmt.Fprintln(out, "  ibc-ferry [--config <file>]             # run one legacy transfer")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Commands:")
 	fmt.Fprintln(out, "  chains                       list configured chains")

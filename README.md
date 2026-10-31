@@ -29,6 +29,10 @@ an `MsgUpdateClient` transaction.
 The newer CLI also keeps a local inventory of links. An IBC v2 link is just a
 bidirectional pair of clients; v2 has no connections or channels.
 
+Chain definitions belong in a config file. The link inventory is dynamic state
+and will move to SQLite next; keeping the two separate lets operators
+version-control config without treating the database as configuration.
+
 ## Requirements
 
 - Go 1.24+
@@ -44,9 +48,13 @@ go build -o ibc-ferry .
 
 ## Config
 
-The legacy single-transfer config uses `src` and `dst`; see
-`config.example.json`. Multi-chain commands use a named `chains` map; see
-`config.chains.example.json`.
+TOML is the primary format. `config.example.toml` shows a multi-chain config;
+`config.example.json` and `config.chains.example.json` remain supported for
+existing JSON setups and legacy one-shot transfers.
+
+The loader picks the format from the filename extension (`.toml` or `.json`)
+and falls back to content sniffing. `--config` overrides the default path
+`~/.config/ibc-ferry/config.toml`; `IBC_FERRY_CONFIG` can override it too.
 
 | Field | Meaning |
 |---|---|
@@ -70,10 +78,12 @@ The legacy single-transfer config uses `src` and `dst`; see
 Global flags go before the command:
 
 ```bash
-ibc-ferry --config config.json chains
-ibc-ferry --config config.json links [--chain <name-or-chain-id>]
-ibc-ferry --config config.json link <link-id>
+ibc-ferry --config config.toml chains
+ibc-ferry --config config.toml links [--chain <name-or-chain-id>]
+ibc-ferry --config config.toml link <link-id>
 ```
+
+With the default config path in place, `--config` can be omitted.
 
 `--state <file>` overrides the local link state path. The default is
 `~/.ibc-ferry/links.json`, or `IBC_FERRY_STATE` when set.
