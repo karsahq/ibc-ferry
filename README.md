@@ -109,6 +109,11 @@ The image is built and pushed by `.github/workflows/image.yml` on `main` and
 version tags. The workflow uses multi-arch `linux/amd64` and `linux/arm64` and
 GHCR via `GITHUB_TOKEN`.
 
+For single-host production with Podman, use the Quadlet service in
+`deploy/quadlet/ferry.container` and the setup notes in
+`deploy/quadlet/README.md`. It runs the same image under systemd with
+`Restart=always`, journald logs, and optional registry auto-update.
+
 ## Config
 
 TOML is the primary format. `config.example.toml` shows a multi-chain config;

@@ -1,0 +1,34 @@
+[Unit]
+Description=ibc-ferry IBC v2 relayer
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/karsahq/ibc-ferry:latest
+ContainerName=ferry
+UserNS=keep-id:uid=10001,gid=10001
+
+Exec=--config /etc/ibc-ferry/config.toml start --http-addr 0.0.0.0:8080
+
+Volume=%h/ibc-ferry/config.toml:/etc/ibc-ferry/config.toml:ro,Z
+Volume=%h/ibc-ferry/state:/var/lib/ibc-ferry:Z
+Volume=%h/ibc-ferry/bin:/opt/ferry/bin:ro,Z
+Volume=%h/ibc-ferry/chains:/var/lib/ferry/chains:rw,Z
+
+PublishPort=127.0.0.1:8080:8080
+ReadOnly=true
+Tmpfs=/tmp
+AutoUpdate=registry
+
+HealthCmd=curl -fsS http://127.0.0.1:8080/healthz
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=90s
+
+[Service]
+Restart=always
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
