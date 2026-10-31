@@ -13,29 +13,29 @@ import (
 
 const merklePrefix = "aWJj" // base64("ibc")
 
-func createClient(chain, counterparty ChainConfig, clientID string, height int64) (int64, error) {
+func createClient(chain, counterparty ChainConfig, height int64) (string, int64, error) {
 	if height == 0 {
 		var err error
 		height, err = latestHeight(counterparty)
 		if err != nil {
-			return 0, err
+			return "", 0, err
 		}
 	}
 	header, err := blockAt(counterparty, height)
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
 	unbonding, err := unbondingPeriod(counterparty)
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
 	appHash, err := hex.DecodeString(header.AppHash)
 	if err != nil {
-		return 0, fmt.Errorf("decode app hash: %w", err)
+		return "", 0, fmt.Errorf("decode app hash: %w", err)
 	}
 	signer, err := relayerAddress(chain)
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
 
 	clientState := map[string]any{
@@ -73,12 +73,35 @@ func createClient(chain, counterparty ChainConfig, clientID string, height int64
 
 	hash, err := broadcast(chain, emptyTx(msg, "2000000"))
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
-	if err := waitTx(chain, hash); err != nil {
-		return 0, err
+	tx, err := waitTxResult(chain, hash)
+	if err != nil {
+		return "", 0, err
 	}
-	return height, nil
+	clientID := txEventValue(tx, "create_client", "client_id")
+	if clientID == "" {
+		return "", 0, fmt.Errorf("tx %s did not report a create_client client_id", hash)
+	}
+	return clientID, height, nil
+}
+
+func txEventValue(tx map[string]any, eventType, key string) string {
+	events, _ := tx["events"].([]any)
+	for _, rawEvent := range events {
+		event, _ := rawEvent.(map[string]any)
+		if event["type"] != eventType {
+			continue
+		}
+		attributes, _ := event["attributes"].([]any)
+		for _, rawAttr := range attributes {
+			attr, _ := rawAttr.(map[string]any)
+			if attr["key"] == key {
+				return str(attr["value"])
+			}
+		}
+	}
+	return ""
 }
 
 func proofSpec(childSize, minPrefix, maxPrefix int) map[string]any {
@@ -458,17 +481,18 @@ func run(cfg Config) error {
 	if err := cfg.validateTransfer(); err != nil {
 		return err
 	}
-	log.Printf("creating %s on %s", cfg.SrcClient, cfg.Src.ChainID)
-	if _, err := createClient(cfg.Src, cfg.Dst, cfg.SrcClient, 0); err != nil {
+	log.Printf("creating client on %s for %s", cfg.Src.ChainID, cfg.Dst.ChainID)
+	srcClient, _, err := createClient(cfg.Src, cfg.Dst, 0)
+	if err != nil {
 		return err
 	}
-	log.Printf("adding counterparty %s to %s", cfg.DstClient, cfg.SrcClient)
-	if err := addCounterparty(cfg.Src, cfg.SrcClient, cfg.DstClient); err != nil {
+	log.Printf("adding counterparty %s to %s", cfg.DstClient, srcClient)
+	if err := addCounterparty(cfg.Src, srcClient, cfg.DstClient); err != nil {
 		return err
 	}
 
 	log.Printf("sending %s %s to %s", cfg.Amount, cfg.Denom, cfg.Receiver)
-	sent, err := sendPacket(cfg.Src, cfg.SrcClient, cfg.Denom, cfg.Amount, cfg.Receiver)
+	sent, err := sendPacket(cfg.Src, srcClient, cfg.Denom, cfg.Amount, cfg.Receiver)
 	if err != nil {
 		return err
 	}
@@ -484,7 +508,7 @@ func run(cfg Config) error {
 		time.Sleep(time.Second)
 	}
 
-	p, err := getProof(cfg.Src, cfg.SrcClient, sent.Sequence)
+	p, err := getProof(cfg.Src, srcClient, sent.Sequence)
 	if err != nil {
 		return err
 	}
@@ -500,18 +524,22 @@ func run(cfg Config) error {
 		time.Sleep(time.Second)
 	}
 
-	log.Printf("creating %s on %s at source height %d", cfg.DstClient, cfg.Dst.ChainID, p.HeightNum)
-	if _, err := createClient(cfg.Dst, cfg.Src, cfg.DstClient, p.HeightNum); err != nil {
+	log.Printf("creating client on %s at source height %d", cfg.Dst.ChainID, p.HeightNum)
+	dstClient, _, err := createClient(cfg.Dst, cfg.Src, p.HeightNum)
+	if err != nil {
 		return err
 	}
-	log.Printf("adding counterparty %s to %s", cfg.SrcClient, cfg.DstClient)
-	if err := addCounterparty(cfg.Dst, cfg.DstClient, cfg.SrcClient); err != nil {
+	if dstClient != cfg.DstClient {
+		return fmt.Errorf("destination client id %s does not match dst_client %s; use a fresh config", dstClient, cfg.DstClient)
+	}
+	log.Printf("adding counterparty %s to %s", srcClient, dstClient)
+	if err := addCounterparty(cfg.Dst, dstClient, srcClient); err != nil {
 		return err
 	}
 
 	log.Printf("relaying MsgRecvPacket")
 	hash, recvAck, err := recvPacket(
-		cfg.Dst, cfg.DstClient, cfg.SrcClient,
+		cfg.Dst, dstClient, srcClient,
 		sent.Sequence, sent.Timeout, sent.Payload, p.Height, p.Commitment,
 	)
 	if err != nil {
@@ -521,13 +549,13 @@ func run(cfg Config) error {
 
 	if cfg.relayAck() {
 		log.Printf("waiting for acknowledgement proof")
-		proof, proofHeight, _, err := getAckProof(cfg.Dst, cfg.DstClient, sent.Sequence)
+		proof, proofHeight, _, err := getAckProof(cfg.Dst, dstClient, sent.Sequence)
 		if err != nil {
 			return err
 		}
-		log.Printf("updating %s on %s for ack at height %v", cfg.SrcClient, cfg.Src.ChainID, proofHeight)
+		log.Printf("updating %s on %s for ack at height %v", srcClient, cfg.Src.ChainID, proofHeight)
 		ackHash, err := ackPacket(
-			cfg.Src, cfg.Dst, cfg.SrcClient, cfg.DstClient,
+			cfg.Src, cfg.Dst, srcClient, dstClient,
 			sent.Sequence, sent.Timeout, sent.Payload, recvAck, proof, proofHeight,
 		)
 		if err != nil {

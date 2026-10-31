@@ -131,6 +131,11 @@ func revisionNumber(chainID string) uint64 {
 }
 
 func waitTx(c ChainConfig, hash string) error {
+	_, err := waitTxResult(c, hash)
+	return err
+}
+
+func waitTxResult(c ChainConfig, hash string) (map[string]any, error) {
 	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
 		out, err := runCLI(c, true, "q", "tx", hash, "--node", c.Node, "-o", "json")
@@ -138,14 +143,14 @@ func waitTx(c ChainConfig, hash string) error {
 			var tx map[string]any
 			if json.Unmarshal([]byte(out), &tx) == nil {
 				if code, ok := tx["code"].(float64); ok && code != 0 {
-					return fmt.Errorf("tx %s failed: %v", hash, tx["raw_log"])
+					return nil, fmt.Errorf("tx %s failed: %v", hash, tx["raw_log"])
 				}
-				return nil
+				return tx, nil
 			}
 		}
 		time.Sleep(time.Second)
 	}
-	return fmt.Errorf("tx %s not indexed", hash)
+	return nil, fmt.Errorf("tx %s not indexed", hash)
 }
 
 func str(v any) string {

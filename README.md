@@ -27,7 +27,9 @@ Creating the destination client *after* the send, at the proof height, avoids
 an `MsgUpdateClient` transaction.
 
 The newer CLI also keeps a local inventory of links. An IBC v2 link is just a
-bidirectional pair of clients; v2 has no connections or channels.
+bidirectional pair of clients; v2 has no connections or channels. `connect`
+reuses existing clients when possible, creates missing ones, registers both
+counterparties, verifies them, and persists the link.
 
 Chain definitions belong in a config file. Runtime state belongs in SQLite;
 keeping the two separate lets operators version-control config without treating
@@ -81,9 +83,21 @@ Global flags go before the command:
 ibc-ferry --config config.toml chains
 ibc-ferry --config config.toml links [--chain <name-or-chain-id>]
 ibc-ferry --config config.toml link <link-id>
+ibc-ferry --config config.toml connect <chain-a> <chain-b>
+ibc-ferry --config config.toml pair <chain-a> <client-a> <chain-b> <client-b>
 ```
 
 With the default config path in place, `--config` can be omitted.
+
+`connect` is idempotent: it prefers a complete existing pair, then an
+unpaired client that tracks the other chain, and only creates a client when
+none is usable. `pair` verifies explicit client IDs, fills in missing
+counterparties, and persists the link. `pair` cannot overwrite a counterparty
+that is already registered to a different client.
+
+The chain requires the same relayer key that created a client to register its
+counterparty. If a client was created by another key, use that key or create a
+new client instead.
 
 `--state <file>` overrides the SQLite state path. The default is
 `~/.local/state/ibc-ferry/state.db` (or `$XDG_STATE_HOME/ibc-ferry/state.db`),
@@ -132,8 +146,9 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 
 - **No timeout relay yet.** The v2 receipt query used by this CLI path does not
   return the non-membership proof required by `MsgTimeout`. Acks are supported.
-- **No connect/pair/doctor yet.** The link commands are read-only for now; the
-  link model and state store are in place for them.
+- **No doctor yet.** `connect` and `pair` are idempotent, but cross-chain
+  transactions are not atomic. A failure after creating one client can leave an
+  orphan; `ferry doctor` will report these once implemented.
 - **Client updates are only for acknowledgements.** A fresh destination client
   is still created per one-shot run; use a new client ID for the next run.
 - **No retry loop or batching.** One packet per invocation.
@@ -144,6 +159,7 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - Karsa <-> Karsa (two local nodes).
 - Karsa -> Gaia v29 and Gaia v29 -> Karsa, native ICS20 v2 transfer.
 - Receive, client update, and acknowledgement relay in both directions.
+- Idempotent `connect` and `pair` against a live Karsa v11 / Gaia v29 pair.
 
 Harnesses live in `examples/`. They expect the Karsa checkout at
 `../karsa` by default; override with `KARSA_ROOT=/path/to/karsa`.
