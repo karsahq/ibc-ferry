@@ -1,0 +1,28 @@
+{
+  "src": {
+    "binary": "/tmp/karsad",
+    "home": "/tmp/karsa-ibc-a",
+    "node": "tcp://127.0.0.1:26657",
+    "rpc": "http://127.0.0.1:26657",
+    "chain_id": "karsa_262144-1",
+    "keyring_backend": "test",
+    "from": "relayer",
+    "gas_prices": "0akra"
+  },
+  "dst": {
+    "binary": "/home/derika/.local/bin/gaiad",
+    "home": "/tmp/gaia-ibc",
+    "node": "tcp://127.0.0.1:26658",
+    "rpc": "http://127.0.0.1:26658",
+    "chain_id": "gaia-test-1",
+    "keyring_backend": "test",
+    "from": "relayer",
+    "gas_prices": "1stake",
+    "fee": [{ "denom": "stake", "amount": "5000000" }]
+  },
+  "src_client": "07-tendermint-0",
+  "dst_client": "07-tendermint-0",
+  "denom": "akra",
+  "amount": "1000",
+  "receiver": "cosmos1..."
+}
