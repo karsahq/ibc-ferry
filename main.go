@@ -48,6 +48,8 @@ func main() {
 		err = cmdPair(cfg, *statePath, args[1:])
 	case "doctor":
 		err = cmdDoctor(cfg, *statePath, args[1:])
+	case "status":
+		err = cmdStatus(cfg, *statePath, args[1:])
 	case "relay":
 		err = cmdRelay(cfg, *statePath, args[1:])
 	case "start":
@@ -76,8 +78,9 @@ func usage() {
 	fmt.Fprintln(out, "  pair <chain-a> <client-a> <chain-b> <client-b>")
 	fmt.Fprintln(out, "                               verify and persist an existing client pair")
 	fmt.Fprintln(out, "  doctor [--strict]            check links, clients, balances and packet state")
+	fmt.Fprintln(out, "  status [--json]              show local relay state")
 	fmt.Fprintln(out, "  relay [--link <id>] [--once] scan and relay packets")
-	fmt.Fprintln(out, "  start                        run the relay loop for all links")
+	fmt.Fprintln(out, "  start                        run the relay loop and status server")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Global flags:")
 	flag.PrintDefaults()

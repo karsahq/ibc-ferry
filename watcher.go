@@ -26,6 +26,7 @@ type relayOptions struct {
 	Interval time.Duration
 	Finality int64
 	Lookback int64
+	HTTPAddr string
 }
 
 type relayAction int
@@ -52,6 +53,7 @@ func cmdRelay(cfg Config, statePath string, args []string) error {
 	fs.SetOutput(os.Stderr)
 	linkID := fs.String("link", "", "only relay this link ID")
 	once := fs.Bool("once", false, "run one cycle and exit")
+	httpAddr := fs.String("http-addr", "", "optional status/metrics listen address")
 	interval := fs.Duration("interval", 5*time.Second, "delay between cycles")
 	finality := fs.Int64("finality", 1, "blocks to wait before scanning")
 	lookback := fs.Int64("lookback", 1000, "blocks to scan on first run")
@@ -67,6 +69,7 @@ func cmdRelay(cfg Config, statePath string, args []string) error {
 		Interval: *interval,
 		Finality: *finality,
 		Lookback: *lookback,
+		HTTPAddr: *httpAddr,
 	})
 }
 
@@ -76,6 +79,7 @@ func cmdStart(cfg Config, statePath string, args []string) error {
 	interval := fs.Duration("interval", 5*time.Second, "delay between cycles")
 	finality := fs.Int64("finality", 1, "blocks to wait before scanning")
 	lookback := fs.Int64("lookback", 1000, "blocks to scan on first run")
+	httpAddr := fs.String("http-addr", "127.0.0.1:8080", "status/metrics listen address")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -86,6 +90,7 @@ func cmdStart(cfg Config, statePath string, args []string) error {
 		Interval: *interval,
 		Finality: *finality,
 		Lookback: *lookback,
+		HTTPAddr: *httpAddr,
 	})
 }
 
@@ -109,8 +114,17 @@ func runRelay(cfg Config, statePath string, opts relayOptions) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	stats := newRelayStats()
+	if opts.HTTPAddr != "" {
+		if err := serveStatus(ctx, opts.HTTPAddr, store, stats, opts.Interval); err != nil {
+			return err
+		}
+	}
+
 	for {
-		if err := relayCycle(store, cfg, opts); err != nil {
+		err := relayCycle(store, cfg, opts, stats)
+		stats.recordCycle(err)
+		if err != nil {
 			if opts.Once {
 				return err
 			}
@@ -127,7 +141,7 @@ func runRelay(cfg Config, statePath string, opts relayOptions) error {
 	}
 }
 
-func relayCycle(store *LinkStore, cfg Config, opts relayOptions) error {
+func relayCycle(store *LinkStore, cfg Config, opts relayOptions, stats *relayStats) error {
 	links, err := selectedLinks(store, opts.LinkID)
 	if err != nil {
 		return err
@@ -139,7 +153,7 @@ func relayCycle(store *LinkStore, cfg Config, opts relayOptions) error {
 
 	var errs []error
 	for _, link := range links {
-		if err := processLink(store, cfg, link, opts); err != nil {
+		if err := processLink(store, cfg, link, opts, stats); err != nil {
 			log.Printf("relay: link %s: %v", link.ID, err)
 			errs = append(errs, fmt.Errorf("link %s: %w", link.ID, err))
 		}
@@ -158,7 +172,7 @@ func selectedLinks(store *LinkStore, linkID string) ([]Link, error) {
 	return []Link{link}, nil
 }
 
-func processLink(store *LinkStore, cfg Config, link Link, opts relayOptions) error {
+func processLink(store *LinkStore, cfg Config, link Link, opts relayOptions, stats *relayStats) error {
 	chainA, err := cfg.chainByID(link.ChainA)
 	if err != nil {
 		return err
@@ -175,7 +189,7 @@ func processLink(store *LinkStore, cfg Config, link Link, opts relayOptions) err
 	if err := scanLinkSide(store, link, chainB, chainA, link.ClientB, link.ClientA, directionBToA, opts); err != nil {
 		errs = append(errs, fmt.Errorf("scan %s: %w", chainB.Config.ChainID, err))
 	}
-	if err := processLinkPackets(store, cfg, link); err != nil {
+	if err := processLinkPackets(store, cfg, link, stats); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
@@ -332,7 +346,7 @@ func decodeAttributeText(value string) (string, bool) {
 	return string(decoded), true
 }
 
-func processLinkPackets(store *LinkStore, cfg Config, link Link) error {
+func processLinkPackets(store *LinkStore, cfg Config, link Link, stats *relayStats) error {
 	packets, err := store.Packets(link.ID)
 	if err != nil {
 		return err
@@ -366,6 +380,7 @@ func processLinkPackets(store *LinkStore, cfg Config, link Link) error {
 			packet.Attempts = 0
 			packet.LastError = ""
 			packet.NextAttemptAt = time.Time{}
+			stats.addAction("recv")
 			log.Printf("relay: %s packet %s/%d: recv tx %s", link.ID, packet.Direction, packet.Sequence, result.TxHash)
 		case relayAck:
 			packet.Status = PacketAcked
@@ -375,6 +390,7 @@ func processLinkPackets(store *LinkStore, cfg Config, link Link) error {
 			packet.Attempts = 0
 			packet.LastError = ""
 			packet.NextAttemptAt = time.Time{}
+			stats.addAction("ack")
 			log.Printf("relay: %s packet %s/%d: ack tx %s", link.ID, packet.Direction, packet.Sequence, result.TxHash)
 		case relayTimeout:
 			packet.Status = PacketTimedOut
@@ -383,12 +399,14 @@ func processLinkPackets(store *LinkStore, cfg Config, link Link) error {
 			packet.Attempts = 0
 			packet.LastError = ""
 			packet.NextAttemptAt = time.Time{}
+			stats.addAction("timeout")
 			log.Printf("relay: %s packet %s/%d: timeout tx %s", link.ID, packet.Direction, packet.Sequence, result.TxHash)
 		case relayDone:
 			packet.Status = result.Status
 			packet.Attempts = 0
 			packet.LastError = ""
 			packet.NextAttemptAt = time.Time{}
+			stats.addAction(result.Status)
 			log.Printf("relay: %s packet %s/%d: %s", link.ID, packet.Direction, packet.Sequence, result.Status)
 		case relayWait:
 			if packet.Status == PacketPending {

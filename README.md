@@ -86,9 +86,10 @@ ibc-ferry --config config.toml link <link-id>
 ibc-ferry --config config.toml connect <chain-a> <chain-b>
 ibc-ferry --config config.toml pair <chain-a> <client-a> <chain-b> <client-b>
 ibc-ferry --config config.toml doctor [--strict]
+ibc-ferry --config config.toml status [--json]
 ibc-ferry --config config.toml relay --link <link-id> --once
 ibc-ferry --config config.toml relay --link <link-id>
-ibc-ferry --config config.toml start
+ibc-ferry --config config.toml start [--http-addr 127.0.0.1:8080]
 ```
 
 With the default config path in place, `--config` can be omitted.
@@ -108,12 +109,16 @@ status, trust-period remaining, orphan/unlinked clients, and packet counts from
 SQLite. Errors make it exit non-zero; `--strict` also fails on warnings.
 
 `relay --once` runs one scan-and-relay cycle; without `--once` it keeps
-running for the selected link. `start` runs the loop for every stored link.
-Each cycle scans `send_packet` and `write_acknowledgement` events, stores new
-packets in SQLite, then decides between recv, ack, and timeout. The defaults
-are a 5s interval, one block of finality, and a 1000-block lookback on first
-run; use `--interval`, `--finality`, and `--lookback` to change them. Failed
-packets get exponential backoff.
+running for the selected link. `start` runs the loop for every stored link and
+serves status/metrics on `127.0.0.1:8080` by default. Each cycle scans
+`send_packet` and `write_acknowledgement` events, stores new packets in SQLite,
+then decides between recv, ack, and timeout. The defaults are a 5s interval,
+one block of finality, and a 1000-block lookback on first run; use
+`--interval`, `--finality`, and `--lookback` to change them. Failed packets get
+exponential backoff.
+
+`status` reads the local SQLite state and prints a table; `--json` emits the
+same data for scripts.
 
 `--state <file>` overrides the SQLite state path. The default is
 `~/.local/state/ibc-ferry/state.db` (or `$XDG_STATE_HOME/ibc-ferry/state.db`),
@@ -144,6 +149,22 @@ The chain remains the source of truth. If the database is lost, packets can be
 rebuilt by rescanning from a known height. The database exists so a restart
 does not forget in-flight work.
 
+## Observability
+
+`ferry start` exposes an HTTP server on the configured address:
+
+| Endpoint | Purpose |
+|---|---|
+| `/healthz` | 200 when the last relay cycle was recent and successful |
+| `/status` | JSON links, packet counts, pending packets, and scan heights |
+| `/metrics` | Prometheus text metrics |
+
+The metrics include `ferry_links_total`, `ferry_packets`,
+`ferry_pending_packets`, `ferry_scan_height`, `ferry_relay_cycles_total`,
+`ferry_relay_actions_total`, `ferry_relay_last_cycle_timestamp_seconds`, and
+`ferry_relay_last_cycle_error`. Bind to loopback unless you put an
+authenticated proxy in front; there is no built-in authentication.
+
 ## How it works
 
 The tool builds the v2 messages as JSON and lets each chain's own binary sign
@@ -165,8 +186,8 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - **No automatic repair for orphans.** `doctor` reports orphaned or unlinked
   clients, but `pair` still needs explicit client IDs to repair them.
 - **No batching.** Packets are processed one transaction at a time.
-- **No metrics or status API yet.** Progress is visible through logs, SQLite,
-  and `ferry doctor`.
+- **Status API has no authentication.** Keep it on loopback or place it behind
+  an authenticated proxy.
 - **Client updates are driven by recv, ack, and timeout.** The legacy one-shot
   mode still creates a fresh destination client per run; use a new client ID
   for the next run.
@@ -183,6 +204,7 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
   `MsgTimeout` relay in both directions.
 - Watcher ingestion, recv, ack, and timeout in both directions against the
   live Karsa v11 / Gaia v29 pair.
+- Status, metrics, and health handlers through unit tests.
 
 Harnesses live in `examples/`. They expect the Karsa checkout at
 `../karsa` by default; override with `KARSA_ROOT=/path/to/karsa`.
