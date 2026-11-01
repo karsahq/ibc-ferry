@@ -238,6 +238,12 @@ on the relay transaction's gas meter. The relayer therefore adds the memo's
 callback would run with whatever gas the relay transaction has left and fail
 with out-of-gas.
 
+Measured on the Karsa keepers: a plain ICS20 v2 receive costs about 166,000 gas,
+and the same receive with a destination callback that approves the voucher and
+pulls it costs about 407,000. A callback may spend up to the limit in its memo,
+so the relayer reserves the full limit rather than the gas one contract happens
+to use.
+
 Chains check a fee against the transaction gas limit, not against the gas that
 is actually used. The relayer therefore treats `fee` as a floor and raises it
 to `gas_limit x gas_prices` whenever that is larger, which matters for batches:
@@ -314,9 +320,10 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - **Status API has no authentication.** Keep it on loopback or place it behind
   an authenticated proxy.
 - **EVM callback relaying is not exercised end to end.** Gas is reserved from
-  the packet memo, but a callback packet also needs an ERC20 token pair, a
-  callback contract, and the isolated receiver address that the receiving chain
-  derives; the harnesses do not build those yet.
+  the packet memo and the receive path is measured on the Karsa keepers, but a
+  callback packet also needs an ERC20 token pair, a callback contract, and the
+  isolated receiver address that the receiving chain derives; the harnesses do
+  not build those yet.
 - **Client updates are driven by recv, ack, and timeout.** The legacy one-shot
   mode still creates a fresh destination client per run; use a new client ID
   for the next run.
