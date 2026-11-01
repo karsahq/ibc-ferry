@@ -62,7 +62,7 @@ import json, sys
 path = sys.argv[1]
 g = json.load(open(path))
 g["consensus"]["params"]["block"]["max_bytes"] = "3000000"
-g["consensus"]["params"]["block"]["max_gas"] = "150000000"
+g["consensus"]["params"]["block"]["max_gas"] = "300000000"
 json.dump(g, open(path, "w"), separators=(",", ":"))
 PY
 }

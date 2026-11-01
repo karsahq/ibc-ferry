@@ -40,7 +40,7 @@ import json, sys
 p = sys.argv[1]
 d = json.load(open(p))
 d["consensus"]["params"]["block"]["max_bytes"] = "3000000"
-d["consensus"]["params"]["block"]["max_gas"] = "150000000"
+d["consensus"]["params"]["block"]["max_gas"] = "300000000"
 json.dump(d, open(p, "w"), separators=(",", ":"))
 PY
   "$BIN" start --home "$home" --chain-id "$chain" --keyring-backend "$KEYRING" \
