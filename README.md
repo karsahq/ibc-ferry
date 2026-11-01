@@ -228,11 +228,12 @@ manually; the watcher applies the same retention automatically.
 `~/.local/state/ibc-ferry/state.db` (or `$XDG_STATE_HOME/ibc-ferry/state.db`),
 or `IBC_FERRY_STATE` when set.
 
-Karsa enables EIP-1559 and a nonzero minimum gas price. Set
-`gas_prices` to that minimum, `"20000000000akra"` for Karsa, and leave `fee`
-out: the relayer pays `gas_limit x gas_prices`, which is 0.014 KRA for a single
-relay message and 0.166 KRA for a ten-packet batch. The examples configure no
-fixed fee.
+Karsa enables EIP-1559 and a nonzero minimum gas price. Set `gas_prices`
+slightly above that minimum, `"22000000000akra"` for Karsa's `20000000000akra`,
+and leave `fee` out: the relayer pays `gas_limit x gas_prices`, which is 0.0154
+KRA for a single relay message and 0.183 KRA for a ten-packet batch. The 10%
+headroom keeps relays working if the chain raises its minimum, and the examples
+configure no fixed fee.
 
 A packet whose memo requests an EVM callback makes the chain run that callback
 on the relay transaction's gas meter. The relayer therefore adds the memo's

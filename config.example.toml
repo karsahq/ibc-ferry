@@ -12,7 +12,7 @@ rpc = "http://127.0.0.1:26657"
 chain_id = "karsa_262144-1"
 keyring_backend = "test"
 from = "relayer"
-gas_prices = "20000000000akra"
+gas_prices = "22000000000akra"
 
 [chains.gaia]
 binary = "/home/derika/.local/bin/gaiad"

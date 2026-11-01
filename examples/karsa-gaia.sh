@@ -96,7 +96,7 @@ cat >/tmp/ibc_v2_relay_karsa_gaia.json <<EOF
   "src": {
     "binary": "$KARSAD", "home": "$A", "node": "tcp://127.0.0.1:26657",
     "rpc": "http://127.0.0.1:26657", "chain_id": "karsa_262144-1",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "20000000000akra"
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "22000000000akra"
   },
   "dst": {
     "binary": "$GAIAD", "home": "$B", "node": "tcp://127.0.0.1:26658",
@@ -126,7 +126,7 @@ cat >/tmp/ibc_v2_relay_gaia_karsa.json <<EOF
   "dst": {
     "binary": "$KARSAD", "home": "$A", "node": "tcp://127.0.0.1:26657",
     "rpc": "http://127.0.0.1:26657", "chain_id": "karsa_262144-1",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "20000000000akra"
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "22000000000akra"
   },
   "src_client": "07-tendermint-1",
   "dst_client": "07-tendermint-1",

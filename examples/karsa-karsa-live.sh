@@ -94,7 +94,7 @@ rpc = "http://127.0.0.1:26667"
 chain_id = "karsa_262144-1"
 keyring_backend = "$KEYRING"
 from = "relayer"
-gas_prices = "20000000000akra"
+gas_prices = "22000000000akra"
 
 
 [chains.b]
@@ -105,7 +105,7 @@ rpc = "http://127.0.0.1:26668"
 chain_id = "karsa_262144-2"
 keyring_backend = "$KEYRING"
 from = "relayer"
-gas_prices = "20000000000akra"
+gas_prices = "22000000000akra"
 
 TOML
 

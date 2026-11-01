@@ -106,12 +106,12 @@ cat >/tmp/ibc_v2_relay_karsa.json <<EOF
   "src": {
     "binary": "$BIN", "home": "$A", "node": "tcp://127.0.0.1:26657",
     "rpc": "http://127.0.0.1:26657", "chain_id": "karsa_262144-1",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "20000000000akra"
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "22000000000akra"
   },
   "dst": {
     "binary": "$BIN", "home": "$B", "node": "tcp://127.0.0.1:26658",
     "rpc": "http://127.0.0.1:26658", "chain_id": "karsa_262144-2",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "20000000000akra"
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "22000000000akra"
   },
   "src_client": "07-tendermint-0",
   "dst_client": "07-tendermint-0",
