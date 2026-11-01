@@ -358,6 +358,11 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 Harnesses live in `examples/`. They expect the Karsa checkout at
 `../karsa` by default; override with `KARSA_ROOT=/path/to/karsa`.
 
+`examples/karsa-karsa-live.sh` starts two Karsa nodes, links them with
+`ferry connect`, runs the opt-in live tests, and tears the nodes down again. It
+runs `^TestLive(Timeout|Watcher|CallbackGas)$` by default; set `FERRY_LIVE_RUN`
+to change the pattern and `FERRY_LIVE_BATCH` to change the batch size.
+
 The live timeout and watcher tests are opt-in:
 
 ```bash
