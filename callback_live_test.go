@@ -115,9 +115,9 @@ func TestLiveCallbackGas(t *testing.T) {
 		t.Fatalf("gas_wanted: %v", err)
 	}
 	gasUsed, _ := asInt64(tx["gas_used"])
-	// The watcher always submits through the batched path, even for a single
-	// packet, so the reservation is the batch cost plus the callback gas.
-	want := int64(batchOverheadGas + batchMessageGas + callbackGas)
+	// A single packet is not a batch, so the transaction carries the
+	// single-message cost plus the callback gas.
+	want := int64(singleRelayGas + callbackGas)
 	if gasWanted != want {
 		t.Fatalf("recv gas_wanted = %d, want %d", gasWanted, want)
 	}

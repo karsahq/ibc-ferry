@@ -130,17 +130,41 @@ func TestRelayGasWithoutPayloads(t *testing.T) {
 
 func TestBatchGas(t *testing.T) {
 	plain := relayMessage("/ibc.core.channel.v2.MsgRecvPacket", "")
-	messages := []map[string]any{plain, plain, plain}
-	want := int64(batchOverheadGas) + 3*batchMessageGas
-	if got := batchGas(messages); got != want {
-		t.Fatalf("batchGas = %d, want %d", got, want)
-	}
-
 	withCallback := relayMessage("/ibc.core.channel.v2.MsgRecvPacket",
 		`{"dest_callback":{"address":"0xabc","gas_limit":"600000"}}`)
-	got := batchGas([]map[string]any{plain, withCallback})
-	want = int64(batchOverheadGas) + 2*batchMessageGas + 600_000
-	if got != want {
-		t.Fatalf("batchGas with a callback = %d, want %d", got, want)
+
+	cases := []struct {
+		name     string
+		messages []map[string]any
+		want     int64
+	}{
+		{
+			name:     "one message uses the single-message cost",
+			messages: []map[string]any{plain},
+			want:     singleRelayGas,
+		},
+		{
+			name:     "one message with a callback adds only the callback gas",
+			messages: []map[string]any{withCallback},
+			want:     singleRelayGas + 600_000,
+		},
+		{
+			name:     "three messages use the batch cost",
+			messages: []map[string]any{plain, plain, plain},
+			want:     int64(batchOverheadGas) + 3*batchMessageGas,
+		},
+		{
+			name:     "a batch adds the callback gas of each message",
+			messages: []map[string]any{plain, withCallback},
+			want:     int64(batchOverheadGas) + 2*batchMessageGas + 600_000,
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := batchGas(test.messages); got != test.want {
+				t.Fatalf("batchGas = %d, want %d", got, test.want)
+			}
+		})
 	}
 }

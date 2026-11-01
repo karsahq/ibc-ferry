@@ -203,7 +203,9 @@ and `--batch-size` to change them; `--retention 0` disables pruning,
 disables batching. Failed packets get exponential backoff.
 
 Relay actions are grouped by destination chain, client, action, and proof
-height. One client update and one transaction are used per group. With
+height. One client update and one transaction are used per group. A group that
+holds a single packet is not a batch and uses the single-message gas limit
+instead of the batch cost, so a quiet link does not pay batching overhead. With
 `--finality >= 1`, recv proofs use one common source height per cycle, so a
 burst of packets can be received in one transaction. `--finality 0` falls back
 to per-packet proofs. If a batch fails, the watcher retries its messages
@@ -341,8 +343,8 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - Ten packets sent in one transaction, received in one transaction, and
   acknowledged in two, with the relayer raising the fee to cover the batch gas.
 - A packet whose memo asks for a 1,000,000 gas destination callback relayed end
-  to end, with the receive transaction carrying the reserved 2,100,000 gas limit
-  (300,000 batch overhead, 800,000 per message, 1,000,000 callback).
+  to end, with the receive transaction carrying the reserved 1,700,000 gas limit
+  (700,000 single-message cost plus the 1,000,000 callback).
 - Watcher ingestion, recv, ack, and timeout in both directions against the
   live Karsa v11 / Gaia v29 pair.
 - Idle client refresh against the same live pair.

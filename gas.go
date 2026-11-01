@@ -27,8 +27,13 @@ func relayGas(message map[string]any, base int64) int64 {
 	return base + callbackGas(message)
 }
 
-// batchGas returns the gas limit for a transaction that carries messages.
+// batchGas returns the gas limit for a transaction that carries messages. A
+// group of one is not a batch: it uses the single-message cost, which is lower
+// because the transaction carries no batching overhead.
 func batchGas(messages []map[string]any) int64 {
+	if len(messages) == 1 {
+		return relayGas(messages[0], singleRelayGas)
+	}
 	total := int64(batchOverheadGas)
 	for _, message := range messages {
 		total += relayGas(message, batchMessageGas)
