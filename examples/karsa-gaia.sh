@@ -48,7 +48,7 @@ REL_A="$("$KARSAD" keys show relayer -a --keyring-backend "$KEYRING" --home "$A"
 "$KARSAD" genesis add-genesis-account "$REL_A" 1000000000000000000000000akra \
   --keyring-backend "$KEYRING" --home "$A" >/dev/null
 "$KARSAD" genesis gentx val 1000000000000000000000akra \
-  --chain-id karsa_262144-1 --keyring-backend "$KEYRING" --home "$A" >/dev/null
+  --gas-prices 1000000000akra --chain-id karsa_262144-1 --keyring-backend "$KEYRING" --home "$A" >/dev/null
 "$KARSAD" genesis collect-gentxs --home "$A" >/dev/null
 sed -i.bak 's/^type = "flood"/type = "app"/' "$A/config/config.toml"
 python3 - "$A/config/genesis.json" <<'PY'
@@ -75,7 +75,7 @@ REL_B="$("$GAIAD" keys show relayer -a --keyring-backend "$KEYRING" --home "$B")
 "$GAIAD" genesis collect-gentxs --home "$B" >/dev/null
 
 "$KARSAD" start --home "$A" --chain-id karsa_262144-1 --keyring-backend "$KEYRING" \
-  --minimum-gas-prices=0akra --evm.min-tip=0 --json-rpc.enable=true \
+  --minimum-gas-prices=1000000000akra --evm.min-tip=1000000000 --json-rpc.enable=true \
   --json-rpc.address 127.0.0.1:18545 --json-rpc.ws-address 127.0.0.1:18546 \
   --json-rpc.api eth,txpool,personal,net,debug,web3 \
   --rpc.laddr tcp://127.0.0.1:26657 --p2p.laddr tcp://127.0.0.1:26656 \
@@ -96,7 +96,8 @@ cat >/tmp/ibc_v2_relay_karsa_gaia.json <<EOF
   "src": {
     "binary": "$KARSAD", "home": "$A", "node": "tcp://127.0.0.1:26657",
     "rpc": "http://127.0.0.1:26657", "chain_id": "karsa_262144-1",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "0akra"
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "1000000000akra",
+    "fee": [{"denom": "akra", "amount": "10000000000000000"}]
   },
   "dst": {
     "binary": "$GAIAD", "home": "$B", "node": "tcp://127.0.0.1:26658",
@@ -128,7 +129,8 @@ cat >/tmp/ibc_v2_relay_gaia_karsa.json <<EOF
   "dst": {
     "binary": "$KARSAD", "home": "$A", "node": "tcp://127.0.0.1:26657",
     "rpc": "http://127.0.0.1:26657", "chain_id": "karsa_262144-1",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "0akra"
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "1000000000akra",
+    "fee": [{"denom": "akra", "amount": "10000000000000000"}]
   },
   "src_client": "07-tendermint-1",
   "dst_client": "07-tendermint-1",

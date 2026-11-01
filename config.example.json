@@ -7,7 +7,13 @@
     "chain_id": "karsa_262144-1",
     "keyring_backend": "test",
     "from": "relayer",
-    "gas_prices": "0akra"
+    "gas_prices": "1000000000akra",
+    "fee": [
+      {
+        "denom": "akra",
+        "amount": "10000000000000000"
+      }
+    ]
   },
   "dst": {
     "binary": "/home/derika/.local/bin/gaiad",
@@ -18,7 +24,12 @@
     "keyring_backend": "test",
     "from": "relayer",
     "gas_prices": "1stake",
-    "fee": [{ "denom": "stake", "amount": "5000000" }]
+    "fee": [
+      {
+        "denom": "stake",
+        "amount": "5000000"
+      }
+    ]
   },
   "src_client": "07-tendermint-0",
   "dst_client": "07-tendermint-0",

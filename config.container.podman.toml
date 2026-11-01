@@ -12,7 +12,11 @@ rpc = "http://host.containers.internal:26657"
 chain_id = "karsa_262144-1"
 keyring_backend = "file"
 from = "ferry"
-gas_prices = "0akra"
+gas_prices = "1000000000akra"
+
+[[chains.karsa.fee]]
+denom = "akra"
+amount = "10000000000000000"
 
 [chains.gaia]
 binary = "/opt/ferry/bin/gaiad"

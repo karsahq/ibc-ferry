@@ -136,7 +136,7 @@ and falls back to content sniffing. `--config` overrides the default path
 | `keyring_backend` | `test`, `file`, ... |
 | `from` | Relayer key name |
 | `gas_prices` | Used by CLI transactions such as `add-counterparty` |
-| `fee` | Optional fixed fee for JSON transactions (some chains reject zero fee) |
+| `fee` | Fixed fee for JSON transactions; Karsa now requires one because the base fee is enabled |
 | `src_client` / `dst_client` | Legacy one-shot client IDs |
 | `ack` | Legacy one-shot; defaults to `true`. Set `false` for receive-only runs |
 | `denom` / `amount` / `receiver` | Legacy one-shot ICS20 transfer fields |
@@ -210,6 +210,10 @@ manually; the watcher applies the same retention automatically.
 `--state <file>` overrides the SQLite state path. The default is
 `~/.local/state/ibc-ferry/state.db` (or `$XDG_STATE_HOME/ibc-ferry/state.db`),
 or `IBC_FERRY_STATE` when set.
+
+Karsa enables EIP-1559 and a nonzero minimum gas price. Use
+`gas_prices = "1000000000akra"` for CLI transactions and a fixed `fee`
+(10000000000000000 akra in the examples) for JSON transactions.
 
 Running without a command keeps the legacy one-shot behavior:
 
