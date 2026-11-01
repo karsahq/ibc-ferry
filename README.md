@@ -59,6 +59,13 @@ Image: `ghcr.io/karsahq/ibc-ferry` (tags: `main`, `sha-...`, version tags, and
 `latest` tracking `main`). Pin a version tag for production. For a private
 package, run `podman login ghcr.io` first.
 
+Each push to `main` publishes `main`, `latest`, and `sha-<commit>`. One build
+is a tagged multi-arch index plus four untagged child manifests (amd64, arm64,
+provenance, SBOM), so the prune job in the image workflow keeps the newest 30
+package versions, roughly six builds, and deletes older ones. Untagged versions
+are never pruned on their own, because that would delete an arch image or
+attestation that a kept index still references.
+
 Podman:
 
 ```bash

@@ -43,3 +43,21 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  prune:
+    needs: publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      # One build publishes a tagged index plus four untagged child manifests
+      # (amd64, arm64, provenance, SBOM), so 30 versions keep roughly six
+      # builds. Untagged versions are never pruned on their own: that would
+      # delete an arch image or attestation that a kept index still points at.
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: ibc-ferry
+          package-type: container
+          min-versions-to-keep: 30
+          token: ${{ secrets.GITHUB_TOKEN }}
