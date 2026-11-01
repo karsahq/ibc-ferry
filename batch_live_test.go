@@ -61,9 +61,16 @@ func TestLiveWatcherBatchPackets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const count = 3
+	count := 3
+	if raw := os.Getenv("FERRY_LIVE_BATCH"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			t.Fatalf("invalid FERRY_LIVE_BATCH %q", raw)
+		}
+		count = parsed
+	}
 	firstSequence, timeout := sendPacketsBatch(t, src.Config, srcClient, denom, "1000", receiver, 120, count)
-	t.Logf("sent sequences %d..%d timeout %d", firstSequence, firstSequence+count-1, timeout)
+	t.Logf("sent sequences %d..%d timeout %d", firstSequence, firstSequence+int64(count)-1, timeout)
 
 	opts := relayOptions{
 		LinkID: link.ID, Once: true, Interval: time.Second,
@@ -80,7 +87,7 @@ func TestLiveWatcherBatchPackets(t *testing.T) {
 		statuses := make(map[int64]string)
 		acked := 0
 		for _, packet := range packets {
-			if packet.SourceClient != srcClient || packet.Sequence < firstSequence || packet.Sequence >= firstSequence+count {
+			if packet.SourceClient != srcClient || packet.Sequence < firstSequence || packet.Sequence >= firstSequence+int64(count) {
 				continue
 			}
 			statuses[packet.Sequence] = packet.Status

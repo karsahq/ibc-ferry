@@ -144,7 +144,7 @@ and falls back to content sniffing. `--config` overrides the default path
 | `keyring_backend` | `test`, `file`, ... |
 | `from` | Relayer key name |
 | `gas_prices` | Used by CLI transactions such as `add-counterparty` |
-| `fee` | Fixed fee for JSON transactions; Karsa now requires one because the base fee is enabled |
+| `fee` | Fee floor for JSON transactions; raised to `gas_limit x gas_prices` when a batch needs more |
 | `src_client` / `dst_client` | Legacy one-shot client IDs |
 | `ack` | Legacy one-shot; defaults to `true`. Set `false` for receive-only runs |
 | `denom` / `amount` / `receiver` | Legacy one-shot ICS20 transfer fields |
@@ -220,8 +220,15 @@ manually; the watcher applies the same retention automatically.
 or `IBC_FERRY_STATE` when set.
 
 Karsa enables EIP-1559 and a nonzero minimum gas price. Use
-`gas_prices = "20000000000akra"` for CLI transactions and a fixed `fee`
+`gas_prices = "20000000000akra"` for CLI transactions and a `fee`
 (100000000000000000 akra in the examples) for JSON transactions.
+
+Chains check a fee against the transaction gas limit, not against the gas that
+is actually used. The relayer therefore treats `fee` as a floor and raises it
+to `gas_limit x gas_prices` whenever that is larger, which matters for batches:
+ten received packets share one proof height and one transaction of roughly 8.3M
+gas, above what the single-message fee covers. Leave `fee` out entirely and the
+amount is derived from `gas_prices` alone.
 
 Running without a command keeps the legacy one-shot behavior:
 
@@ -305,6 +312,8 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - `doctor` clean and broken-link detection against the same live pair.
 - Short-timeout packets with a non-membership proof and a successful
   `MsgTimeout` relay in both directions.
+- Ten packets sent in one transaction, received in one transaction, and
+  acknowledged in two, with the relayer raising the fee to cover the batch gas.
 - Watcher ingestion, recv, ack, and timeout in both directions against the
   live Karsa v11 / Gaia v29 pair.
 - Idle client refresh against the same live pair.
@@ -325,6 +334,10 @@ FERRY_LIVE_CONFIG=... FERRY_LIVE_STATE=... \
 FERRY_LIVE_SRC=karsa FERRY_LIVE_DST=gaia FERRY_LIVE_DENOM=akra \
 go test -tags=live -run 'TestLive(Timeout|Watcher)' -v
 ```
+
+`TestLiveWatcherBatchPackets` sends three packets unless `FERRY_LIVE_BATCH`
+sets a different count. Send a batch of ten to exercise the fee path: the send,
+the receive, and the acknowledgements then exceed the single-message fee.
 
 ## Status
 

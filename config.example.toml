@@ -11,6 +11,8 @@ keyring_backend = "test"
 from = "relayer"
 gas_prices = "20000000000akra"
 
+# The fee is a floor. The relayer raises it to gas_limit x gas_prices when a
+# batch transaction needs more, and derives it entirely when fee is absent.
 [[chains.karsa.fee]]
 denom = "akra"
 amount = "100000000000000000"
