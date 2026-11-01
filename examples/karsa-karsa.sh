@@ -32,7 +32,7 @@ setup_chain() {
   "$BIN" genesis add-genesis-account "$relayer" 1000000000000000000000000akra \
     --keyring-backend "$KEYRING" --home "$home" >/dev/null
   "$BIN" genesis gentx val 1000000000000000000000akra \
-    --gas-prices 1000000000akra --chain-id "$chain" --keyring-backend "$KEYRING" --home "$home" >/dev/null
+    --gas-prices 20000000000akra --chain-id "$chain" --keyring-backend "$KEYRING" --home "$home" >/dev/null
   "$BIN" genesis collect-gentxs --home "$home" >/dev/null
   sed -i.bak 's/^type = "flood"/type = "app"/' "$home/config/config.toml"
   python3 - "$home/config/genesis.json" <<'PY'
@@ -45,7 +45,7 @@ json.dump(d, open(p, "w"), separators=(",", ":"))
 PY
   "$BIN" start --home "$home" --chain-id "$chain" --keyring-backend "$KEYRING" \
     --log_level=debug \
-    --minimum-gas-prices=1000000000akra --evm.min-tip=1000000000 --json-rpc.enable=true \
+    --minimum-gas-prices=20000000000akra --evm.min-tip=20000000000 --json-rpc.enable=true \
     --json-rpc.address "127.0.0.1:${jsonrpc}" \
     --json-rpc.ws-address "127.0.0.1:$((jsonrpc + 1))" \
     --json-rpc.api eth,txpool,personal,net,debug,web3 \
@@ -84,7 +84,7 @@ if [[ "${RUN_BANK:-0}" == "1" ]]; then
   OUT="$("$BIN" tx bank send relayer "$VAL_A" 1000akra --from relayer \
     --keyring-backend "$KEYRING" --home "$A" --chain-id karsa_262144-1 \
     --node tcp://127.0.0.1:26657 --broadcast-mode sync --gas auto \
-    --gas-adjustment 1.3 --gas-prices 1000000000akra -y -o json)"
+    --gas-adjustment 1.3 --gas-prices 20000000000akra -y -o json)"
   echo "bank send: $OUT"
   HASH="$(printf '%s' "$OUT" | sed -nE 's/.*"txhash":"([^"]+)".*/\1/p')"
   sleep 8
@@ -106,14 +106,14 @@ cat >/tmp/ibc_v2_relay_karsa.json <<EOF
   "src": {
     "binary": "$BIN", "home": "$A", "node": "tcp://127.0.0.1:26657",
     "rpc": "http://127.0.0.1:26657", "chain_id": "karsa_262144-1",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "1000000000akra",
-    "fee": [{"denom": "akra", "amount": "10000000000000000"}]
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "20000000000akra",
+    "fee": [{"denom": "akra", "amount": "100000000000000000"}]
   },
   "dst": {
     "binary": "$BIN", "home": "$B", "node": "tcp://127.0.0.1:26658",
     "rpc": "http://127.0.0.1:26658", "chain_id": "karsa_262144-2",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "1000000000akra",
-    "fee": [{"denom": "akra", "amount": "10000000000000000"}]
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "20000000000akra",
+    "fee": [{"denom": "akra", "amount": "100000000000000000"}]
   },
   "src_client": "07-tendermint-0",
   "dst_client": "07-tendermint-0",

@@ -212,8 +212,8 @@ manually; the watcher applies the same retention automatically.
 or `IBC_FERRY_STATE` when set.
 
 Karsa enables EIP-1559 and a nonzero minimum gas price. Use
-`gas_prices = "1000000000akra"` for CLI transactions and a fixed `fee`
-(10000000000000000 akra in the examples) for JSON transactions.
+`gas_prices = "20000000000akra"` for CLI transactions and a fixed `fee`
+(100000000000000000 akra in the examples) for JSON transactions.
 
 Running without a command keeps the legacy one-shot behavior:
 

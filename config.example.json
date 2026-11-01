@@ -7,11 +7,11 @@
     "chain_id": "karsa_262144-1",
     "keyring_backend": "test",
     "from": "relayer",
-    "gas_prices": "1000000000akra",
+    "gas_prices": "20000000000akra",
     "fee": [
       {
         "denom": "akra",
-        "amount": "10000000000000000"
+        "amount": "100000000000000000"
       }
     ]
   },
