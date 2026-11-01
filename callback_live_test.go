@@ -124,6 +124,13 @@ func TestLiveCallbackGas(t *testing.T) {
 	if gasUsed > gasWanted {
 		t.Fatalf("recv gas_used %d exceeds gas_wanted %d", gasUsed, gasWanted)
 	}
+	if raw, ok := tx["tx"].(map[string]any); ok {
+		if auth, ok := raw["auth_info"].(map[string]any); ok {
+			if fee, ok := auth["fee"].(map[string]any); ok {
+				t.Logf("recv fee %v", fee["amount"])
+			}
+		}
+	}
 	t.Logf("recv gas_wanted %d gas_used %d status %s", gasWanted, gasUsed, record.Status)
 }
 

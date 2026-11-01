@@ -96,9 +96,6 @@ keyring_backend = "$KEYRING"
 from = "relayer"
 gas_prices = "20000000000akra"
 
-[[chains.a.fee]]
-denom = "akra"
-amount = "100000000000000000"
 
 [chains.b]
 binary = "$BIN"
@@ -110,9 +107,6 @@ keyring_backend = "$KEYRING"
 from = "relayer"
 gas_prices = "20000000000akra"
 
-[[chains.b.fee]]
-denom = "akra"
-amount = "100000000000000000"
 TOML
 
 rm -f "$STATE" "$STATE-shm" "$STATE-wal"

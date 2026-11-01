@@ -96,14 +96,12 @@ cat >/tmp/ibc_v2_relay_karsa_gaia.json <<EOF
   "src": {
     "binary": "$KARSAD", "home": "$A", "node": "tcp://127.0.0.1:26657",
     "rpc": "http://127.0.0.1:26657", "chain_id": "karsa_262144-1",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "20000000000akra",
-    "fee": [{"denom": "akra", "amount": "100000000000000000"}]
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "20000000000akra"
   },
   "dst": {
     "binary": "$GAIAD", "home": "$B", "node": "tcp://127.0.0.1:26658",
     "rpc": "http://127.0.0.1:26658", "chain_id": "gaia-test-1",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "1stake",
-    "fee": [{"denom": "stake", "amount": "5000000"}]
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "1stake"
   },
   "src_client": "07-tendermint-0",
   "dst_client": "07-tendermint-0",
@@ -123,14 +121,12 @@ cat >/tmp/ibc_v2_relay_gaia_karsa.json <<EOF
   "src": {
     "binary": "$GAIAD", "home": "$B", "node": "tcp://127.0.0.1:26658",
     "rpc": "http://127.0.0.1:26658", "chain_id": "gaia-test-1",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "1stake",
-    "fee": [{"denom": "stake", "amount": "5000000"}]
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "1stake"
   },
   "dst": {
     "binary": "$KARSAD", "home": "$A", "node": "tcp://127.0.0.1:26657",
     "rpc": "http://127.0.0.1:26657", "chain_id": "karsa_262144-1",
-    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "20000000000akra",
-    "fee": [{"denom": "akra", "amount": "100000000000000000"}]
+    "keyring_backend": "$KEYRING", "from": "relayer", "gas_prices": "20000000000akra"
   },
   "src_client": "07-tendermint-1",
   "dst_client": "07-tendermint-1",

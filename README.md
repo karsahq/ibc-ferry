@@ -151,7 +151,7 @@ and falls back to content sniffing. `--config` overrides the default path
 | `keyring_backend` | `test`, `file`, ... |
 | `from` | Relayer key name |
 | `gas_prices` | Used by CLI transactions such as `add-counterparty` |
-| `fee` | Fee floor for JSON transactions; raised to `gas_limit x gas_prices` when a batch needs more |
+| `fee` | Optional fee floor for JSON transactions; derived from `gas_limit x gas_prices` when absent |
 | `src_client` / `dst_client` | Legacy one-shot client IDs |
 | `ack` | Legacy one-shot; defaults to `true`. Set `false` for receive-only runs |
 | `denom` / `amount` / `receiver` | Legacy one-shot ICS20 transfer fields |
@@ -228,9 +228,11 @@ manually; the watcher applies the same retention automatically.
 `~/.local/state/ibc-ferry/state.db` (or `$XDG_STATE_HOME/ibc-ferry/state.db`),
 or `IBC_FERRY_STATE` when set.
 
-Karsa enables EIP-1559 and a nonzero minimum gas price. Use
-`gas_prices = "20000000000akra"` for CLI transactions and a `fee`
-(100000000000000000 akra in the examples) for JSON transactions.
+Karsa enables EIP-1559 and a nonzero minimum gas price. Set
+`gas_prices` to that minimum, `"20000000000akra"` for Karsa, and leave `fee`
+out: the relayer pays `gas_limit x gas_prices`, which is 0.014 KRA for a single
+relay message and 0.166 KRA for a ten-packet batch. The examples configure no
+fixed fee.
 
 A packet whose memo requests an EVM callback makes the chain run that callback
 on the relay transaction's gas meter. The relayer therefore adds the memo's
@@ -247,11 +249,10 @@ so the relayer reserves the full limit rather than the gas one contract happens
 to use.
 
 Chains check a fee against the transaction gas limit, not against the gas that
-is actually used. The relayer therefore treats `fee` as a floor and raises it
-to `gas_limit x gas_prices` whenever that is larger, which matters for batches:
-ten received packets share one proof height and one transaction of roughly 8.3M
-gas, above what the single-message fee covers. Leave `fee` out entirely and the
-amount is derived from `gas_prices` alone.
+is actually used, so the fee has to grow with the transaction. The relayer pays
+`gas_limit x gas_prices`, and a configured `fee` only raises that when it is
+larger. A batch matters here: ten received packets share one proof height and
+one transaction of roughly 8.3M gas, seven times the fee of a single message.
 
 Running without a command keeps the legacy one-shot behavior:
 

@@ -1,5 +1,8 @@
 # Chain definitions are static configuration. Runtime state lives in the
 # state database, not here.
+#
+# Fees are derived from gas_prices and each transaction's gas limit. Add a
+# [[chains.<name>.fee]] table only when you want to pay a higher fixed floor.
 
 [chains.karsa]
 binary = "/tmp/karsad"
@@ -11,12 +14,6 @@ keyring_backend = "test"
 from = "relayer"
 gas_prices = "20000000000akra"
 
-# The fee is a floor. The relayer raises it to gas_limit x gas_prices when a
-# batch transaction needs more, and derives it entirely when fee is absent.
-[[chains.karsa.fee]]
-denom = "akra"
-amount = "100000000000000000"
-
 [chains.gaia]
 binary = "/home/derika/.local/bin/gaiad"
 home = "/tmp/gaia-ibc"
@@ -27,6 +24,3 @@ keyring_backend = "test"
 from = "relayer"
 gas_prices = "1stake"
 
-[[chains.gaia.fee]]
-denom = "stake"
-amount = "5000000"

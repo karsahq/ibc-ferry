@@ -14,10 +14,6 @@ keyring_backend = "file"
 from = "ferry"
 gas_prices = "20000000000akra"
 
-[[chains.karsa.fee]]
-denom = "akra"
-amount = "100000000000000000"
-
 [chains.gaia]
 binary = "/opt/ferry/bin/gaiad"
 home = "/var/lib/ferry/chains/gaia"
@@ -28,6 +24,3 @@ keyring_backend = "file"
 from = "ferry"
 gas_prices = "1stake"
 
-[[chains.gaia.fee]]
-denom = "stake"
-amount = "5000000"
