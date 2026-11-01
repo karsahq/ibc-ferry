@@ -8,7 +8,7 @@ Image=ghcr.io/karsahq/ibc-ferry:latest
 ContainerName=ferry
 UserNS=keep-id:uid=10001,gid=10001
 
-Exec=--config /etc/ibc-ferry/config.toml start --http-addr 0.0.0.0:8080
+Exec=--config /etc/ibc-ferry/config.toml --state /var/lib/ibc-ferry/state.db start --http-addr 0.0.0.0:8080
 
 Volume=%h/ibc-ferry/config.toml:/etc/ibc-ferry/config.toml:ro,Z
 Volume=%h/ibc-ferry/state:/var/lib/ibc-ferry:Z

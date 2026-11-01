@@ -25,4 +25,4 @@ WORKDIR /var/lib/ibc-ferry
 EXPOSE 8080
 
 ENTRYPOINT ["/usr/local/bin/ibc-ferry"]
-CMD ["--config", "/etc/ibc-ferry/config.toml", "start", "--http-addr", "0.0.0.0:8080"]
+CMD ["--config", "/etc/ibc-ferry/config.toml", "--state", "/var/lib/ibc-ferry/state.db", "start", "--http-addr", "0.0.0.0:8080"]

@@ -92,7 +92,12 @@ Path layout inside the container:
 | `/opt/ferry/bin` | Mounted chain binaries |
 | `/var/lib/ferry/chains` | Mounted per-chain homes and keyrings |
 | `/var/lib/ibc-ferry` | SQLite state volume |
+| `/var/lib/ibc-ferry/state.db` | SQLite state file set by the image `CMD` |
 | `/etc/ibc-ferry/config.toml` | Mounted config |
+
+The image sets `--state /var/lib/ibc-ferry/state.db`, so links and packet
+progress live in the mounted state volume instead of `$HOME/.local` and survive
+container restarts and image updates.
 
 Rootless Podman maps the container user to a subuid unless `userns_mode:
 keep-id` is used. If the keyring is not readable, chown the dedicated chains
@@ -104,6 +109,9 @@ podman unshare chown -R 10001:10001 chains
 
 If `host.containers.internal` is not enough for your Podman network, use
 `network_mode: host` and change the config RPC URLs to `127.0.0.1`.
+
+This setup is verified with rootless Podman 6.1 (`podman compose` through
+`podman-compose` 1.6) and with the Quadlet unit from `deploy/quadlet`.
 
 The image is built and pushed by `.github/workflows/image.yml` on `main` and
 version tags. The workflow uses multi-arch `linux/amd64` and `linux/arm64` and

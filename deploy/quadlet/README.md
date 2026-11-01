@@ -16,8 +16,11 @@ The image is chain-agnostic: mount the chain binaries under
   bin/gaiad
   chains/karsa/
   chains/gaia/
-  state/
+  state/state.db
 ```
+
+`state/` is mounted at `/var/lib/ibc-ferry`; the unit passes
+`--state /var/lib/ibc-ferry/state.db`, so the SQLite state survives restarts.
 
 The example config is `config.container.podman.toml` in the repository root.
 It points binaries at `/opt/ferry/bin`, homes at `/var/lib/ferry/chains`, and
