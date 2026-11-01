@@ -319,11 +319,11 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
   `write_acknowledgement` events outside the scan window.
 - **Status API has no authentication.** Keep it on loopback or place it behind
   an authenticated proxy.
-- **EVM callback relaying is not exercised end to end.** Gas is reserved from
-  the packet memo and the receive path is measured on the Karsa keepers, but a
-  callback packet also needs an ERC20 token pair, a callback contract, and the
-  isolated receiver address that the receiving chain derives; the harnesses do
-  not build those yet.
+- **A successful EVM callback is not relayed end to end.** A callback packet is
+  relayed with the reserved gas, but its target has no code in the harness, so
+  the chain answers with an error acknowledgement. Exercising a successful
+  callback also needs an ERC20 token pair, a callback contract, and the isolated
+  receiver address that the receiving chain derives.
 - **Client updates are driven by recv, ack, and timeout.** The legacy one-shot
   mode still creates a fresh destination client per run; use a new client ID
   for the next run.
@@ -340,6 +340,9 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
   `MsgTimeout` relay in both directions.
 - Ten packets sent in one transaction, received in one transaction, and
   acknowledged in two, with the relayer raising the fee to cover the batch gas.
+- A packet whose memo asks for a 1,000,000 gas destination callback relayed end
+  to end, with the receive transaction carrying the reserved 2,100,000 gas limit
+  (300,000 batch overhead, 800,000 per message, 1,000,000 callback).
 - Watcher ingestion, recv, ack, and timeout in both directions against the
   live Karsa v11 / Gaia v29 pair.
 - Idle client refresh against the same live pair.
@@ -360,7 +363,7 @@ The live timeout and watcher tests are opt-in:
 ```bash
 FERRY_LIVE_CONFIG=... FERRY_LIVE_STATE=... \
 FERRY_LIVE_SRC=karsa FERRY_LIVE_DST=gaia FERRY_LIVE_DENOM=akra \
-go test -tags=live -run 'TestLive(Timeout|Watcher)' -v
+go test -tags=live -run 'TestLive(Timeout|Watcher|CallbackGas)' -v
 ```
 
 `TestLiveWatcherBatchPackets` sends three packets unless `FERRY_LIVE_BATCH`
