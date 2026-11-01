@@ -289,7 +289,7 @@ func recvPacketWithPayloads(dst ChainConfig, dstClient string, srcClient string,
 	if err != nil {
 		return "", "", err
 	}
-	hash, err := broadcast(dst, emptyTx(msg, "700000"))
+	hash, err := broadcast(dst, emptyTx(msg, strconv.FormatInt(relayGas(msg, singleRelayGas), 10)))
 	if err != nil {
 		return "", "", err
 	}
@@ -487,7 +487,7 @@ func ackPacketWithPayloads(src, dst ChainConfig, srcClient, dstClient string, se
 	if err != nil {
 		return "", err
 	}
-	hash, err := broadcast(src, emptyTx(msg, "700000"))
+	hash, err := broadcast(src, emptyTx(msg, strconv.FormatInt(relayGas(msg, singleRelayGas), 10)))
 	if err != nil {
 		return "", err
 	}
@@ -613,7 +613,7 @@ func timeoutPacketWithPayloads(src, dst ChainConfig, srcClient, dstClient string
 	if err != nil {
 		return "", err
 	}
-	hash, err := broadcast(src, emptyTx(msg, "700000"))
+	hash, err := broadcast(src, emptyTx(msg, strconv.FormatInt(relayGas(msg, singleRelayGas), 10)))
 	if err != nil {
 		return "", err
 	}
@@ -768,8 +768,7 @@ func broadcastMessages(chain ChainConfig, messages []map[string]any) (string, er
 	if len(messages) == 0 {
 		return "", fmt.Errorf("no messages to broadcast")
 	}
-	gas := 300000 + int64(len(messages))*800000
-	hash, err := broadcast(chain, emptyBatchTx(messages, strconv.FormatInt(gas, 10)))
+	hash, err := broadcast(chain, emptyBatchTx(messages, strconv.FormatInt(batchGas(messages), 10)))
 	if err != nil {
 		return "", err
 	}

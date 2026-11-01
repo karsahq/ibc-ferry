@@ -230,6 +230,14 @@ Karsa enables EIP-1559 and a nonzero minimum gas price. Use
 `gas_prices = "20000000000akra"` for CLI transactions and a `fee`
 (100000000000000000 akra in the examples) for JSON transactions.
 
+A packet whose memo requests an EVM callback makes the chain run that callback
+on the relay transaction's gas meter. The relayer therefore adds the memo's
+`gas_limit` to that message's gas limit: `dest_callback` on receive, and
+`src_callback` on acknowledgement or timeout. The reservation is capped at
+1,000,000 per payload, which is the cap Karsa configures. Without it the
+callback would run with whatever gas the relay transaction has left and fail
+with out-of-gas.
+
 Chains check a fee against the transaction gas limit, not against the gas that
 is actually used. The relayer therefore treats `fee` as a floor and raises it
 to `gas_limit x gas_prices` whenever that is larger, which matters for batches:
@@ -305,6 +313,10 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
   `write_acknowledgement` events outside the scan window.
 - **Status API has no authentication.** Keep it on loopback or place it behind
   an authenticated proxy.
+- **EVM callback relaying is not exercised end to end.** Gas is reserved from
+  the packet memo, but a callback packet also needs an ERC20 token pair, a
+  callback contract, and the isolated receiver address that the receiving chain
+  derives; the harnesses do not build those yet.
 - **Client updates are driven by recv, ack, and timeout.** The legacy one-shot
   mode still creates a fresh destination client per run; use a new client ID
   for the next run.
@@ -329,6 +341,8 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - Acknowledgement bytes recovered from the transaction index after a packet
   was received by another relayer.
 - Status, metrics, and health handlers through unit tests.
+- Gas reservation for callback packets and fee derivation for single and
+  batched transactions through unit tests.
 - Terminal packet retention and manual pruning through unit tests.
 
 Harnesses live in `examples/`. They expect the Karsa checkout at
