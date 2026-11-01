@@ -67,11 +67,20 @@ func TestLiveCallbackGas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// FERRY_LIVE_RECEIVER and FERRY_LIVE_MEMO let the harness point the packet
+	// at a deployed callback contract and the isolated receiver address the
+	// chain derives for it. The memo must still ask for callbackGas.
+	if override := os.Getenv("FERRY_LIVE_RECEIVER"); override != "" {
+		receiver = override
+	}
 	const callbackGas = 1_000_000
 	memo := fmt.Sprintf(
 		`{"dest_callback":{"address":"0x1234567890123456789012345678901234567890","gas_limit":"%d"}}`,
 		callbackGas,
 	)
+	if override := os.Getenv("FERRY_LIVE_MEMO"); override != "" {
+		memo = override
+	}
 	sequence, err := sendPacketWithMemo(t, src.Config, srcClient, denom, "1000", receiver, 120, memo)
 	if err != nil {
 		t.Fatal(err)

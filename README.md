@@ -245,7 +245,13 @@ with out-of-gas.
 
 Measured on the Karsa keepers: a plain ICS20 v2 receive costs about 166,000 gas,
 and the same receive with a destination callback that approves the voucher and
-pulls it costs about 407,000. A callback may spend up to the limit in its memo,
+pulls it costs about 407,000. A live receive through the relayer with the same
+callback used 409,073 gas.
+
+The callback `calldata` is parsed with a plain hex decoder, so an `0x` prefix
+makes the memo invalid and the packet fails before the callback runs: the
+relayer reports the packet as relayed, the acknowledgement is the error
+sentinel, and nothing moves. Emit the calldata without the prefix. A callback may spend up to the limit in its memo,
 so the relayer reserves the full limit rather than the gas one contract happens
 to use.
 
@@ -323,11 +329,11 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
   `write_acknowledgement` events outside the scan window.
 - **Status API has no authentication.** Keep it on loopback or place it behind
   an authenticated proxy.
-- **A successful EVM callback is not relayed end to end.** A callback packet is
-  relayed with the reserved gas, but its target has no code in the harness, so
-  the chain answers with an error acknowledgement. Exercising a successful
-  callback also needs an ERC20 token pair, a callback contract, and the isolated
-  receiver address that the receiving chain derives.
+- **Destination callbacks need chain-side preparation.** A successful callback
+  needs the received denom registered as an ERC20, a callback contract, and a
+  receiver equal to the isolated address the receiving chain derives from the
+  destination client and the packet sender. `examples/karsa-callback.sh` builds
+  all three; the relayer itself does not provision them.
 - **Client updates are driven by recv, ack, and timeout.** The legacy one-shot
   mode still creates a fresh destination client per run; use a new client ID
   for the next run.
@@ -347,6 +353,9 @@ been tested across Karsa (ibc-go v11) and Gaia v29 (ibc-go v10).
 - A packet whose memo asks for a 1,000,000 gas destination callback relayed end
   to end, with the receive transaction carrying the reserved 1,700,000 gas limit
   (700,000 single-message cost plus the 1,000,000 callback).
+- A destination callback that really executes: the CounterWithCallbacks contract
+  approved and pulled the 1000-unit IBC voucher, the isolated address kept
+  nothing, and the receive used 409,073 of its 1,700,000 gas.
 - Watcher ingestion, recv, ack, and timeout in both directions against the
   live Karsa v11 / Gaia v29 pair.
 - Idle client refresh against the same live pair.
@@ -366,6 +375,13 @@ Harnesses live in `examples/`. They expect the Karsa checkout at
 `ferry connect`, runs the opt-in live tests, and tears the nodes down again. It
 runs `^TestLive(Timeout|Watcher|CallbackGas)$` by default; set `FERRY_LIVE_RUN`
 to change the pattern and `FERRY_LIVE_BATCH` to change the batch size.
+
+`examples/karsa-callback.sh` goes one step further for the destination callback:
+it registers the IBC voucher as an ERC20 in the destination genesis, deploys the
+CounterWithCallbacks contract, relays a packet whose memo calls it, and verifies
+that the contract holds the voucher and the isolated address holds nothing. The
+derivations it needs live in `examples/callbackhelper`, which runs inside the
+Karsa checkout because it imports the chain's Go modules.
 
 The live timeout and watcher tests are opt-in:
 
